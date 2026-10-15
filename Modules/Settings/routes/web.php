@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use Modules\Settings\Http\Controllers\SettingsController;
+use Modules\Settings\Http\Controllers\WorkLocationImportController;
 use Modules\Settings\Http\Controllers\LoanTypeController;  
 
 // Routes pour les entreprises
@@ -40,6 +41,9 @@ Route::middleware(['auth', 'maintenance'])->prefix('company')->name('company.')-
 
         // Routes pour les emplacements de travail (pointeuses)
         Route::get('/work-locations', [SettingsController::class, 'workLocations'])->name('work-locations.index');
+        Route::get('/work-locations/import/modele', [WorkLocationImportController::class, 'template'])->name('work-locations.import.template');
+        Route::post('/work-locations/import/apercu', [WorkLocationImportController::class, 'preview'])->name('work-locations.import.preview');
+        Route::post('/work-locations/import/confirmer', [WorkLocationImportController::class, 'confirm'])->name('work-locations.import.confirm');
         Route::post('/work-locations', [SettingsController::class, 'storeWorkLocation'])->name('work-locations.store');
         Route::put('/work-locations/{workLocation}', [SettingsController::class, 'updateWorkLocation'])->name('work-locations.update');
         Route::put('/work-locations/{workLocation}/toggle', [SettingsController::class, 'toggleWorkLocation'])->name('work-locations.toggle');

@@ -312,6 +312,29 @@
             return;
         }
 
+        const envoyer = (motif) => fetch(`{{ route('company.employees.demandes.validate', ':id') }}`.replace(':id', id), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': '{{ csrf_token() }}'
+            },
+            body: JSON.stringify({
+                periode_id: periodeId || {{ $demande->periode_id ?? 'null' }},
+                effectif_derogation: motif || null
+            })
+        }).then(response => response.json());
+
+        const succes = () => Swal.fire({
+            title: 'Succès!',
+            text: 'La demande a été validée avec succès',
+            icon: 'success',
+            timer: 2000,
+            timerProgressBar: true,
+            willClose: () => {
+                window.location.href = '{{ route('company.employees.demandes.index') }}'
+            }
+        });
+
         Swal.fire({
             title: 'Valider la demande',
             text: "Êtes-vous sûr de vouloir valider cette demande ?",
@@ -323,17 +346,49 @@
             cancelButtonText: 'Annuler',
             showLoaderOnConfirm: true,
             preConfirm: () => {
-                return fetch(`{{ route('company.employees.demandes.validate', ':id') }}`.replace(':id', id), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
-                    },
-                    body: JSON.stringify({
-                        periode_id: periodeId || {{ $demande->periode_id ?? 'null' }}
-                    })
+                return envoyer()
+                .then(data => {
+                    if (!data.success && !data.effectif_conflit) {
+                        throw new Error(data.message || 'Erreur lors de la validation')
+                    }
+                    return data
                 })
-                .then(response => response.json())
+                .catch(error => {
+                    Swal.showValidationMessage(
+                        error.message || 'Erreur lors de la validation'
+                    )
+                })
+            },
+            allowOutsideClick: () => !Swal.isLoading()
+        }).then((result) => {
+            if (!result.isConfirmed) return;
+
+            if (result.value && result.value.effectif_conflit) {
+                demanderDerogation(result.value.message, envoyer, succes);
+            } else {
+                succes();
+            }
+        })
+    }
+
+    // Effectif du département insuffisant : le RH ne peut accorder qu'en motivant sa dérogation
+    function demanderDerogation(message, envoyer, succes) {
+        Swal.fire({
+            title: 'Effectif insuffisant',
+            text: message,
+            icon: 'warning',
+            input: 'textarea',
+            inputLabel: 'Motif de dérogation',
+            inputPlaceholder: 'Ex. : urgence familiale, remplaçant prévu…',
+            inputValidator: (value) => !value.trim() ? 'Le motif est obligatoire pour accorder quand même.' : null,
+            showCancelButton: true,
+            confirmButtonColor: '#f0ad4e',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'Accorder quand même',
+            cancelButtonText: 'Annuler',
+            showLoaderOnConfirm: true,
+            preConfirm: (motif) => {
+                return envoyer(motif.trim())
                 .then(data => {
                     if (!data.success) {
                         throw new Error(data.message || 'Erreur lors de la validation')
@@ -348,18 +403,7 @@
             },
             allowOutsideClick: () => !Swal.isLoading()
         }).then((result) => {
-            if (result.isConfirmed) {
-                Swal.fire({
-                    title: 'Succès!',
-                    text: 'La demande a été validée avec succès',
-                    icon: 'success',
-                    timer: 2000,
-                    timerProgressBar: true,
-                    willClose: () => {
-                        window.location.href = '{{ route('company.employees.demandes.index') }}'
-                    }
-                })
-            }
+            if (result.isConfirmed) succes();
         })
     }
 

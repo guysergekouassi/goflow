@@ -5,6 +5,7 @@ namespace Modules\Settings\Http\Controllers;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Modules\Leaves\Models\LeaveType;
 use Modules\Settings\Models\WorkLocation;
@@ -13,6 +14,7 @@ use Illuminate\Support\Facades\Hash;
 use App\Models\User;
 use App\Models\Branch;
 use App\Models\Department;
+use App\Services\DepartmentStaffingGuard;
 use App\Models\Company;
 use App\Models\Designation;
 use App\Models\Country;
@@ -527,6 +529,8 @@ class SettingsController extends Controller
                 'department_id' => 'nullable|exists:departments,id',
                 'manager_id' => 'nullable|exists:users,id',
                 'has_time_clock' => 'nullable|boolean',
+                'allow_remote_clock' => 'nullable|boolean',
+                'max_distance_meters' => 'nullable|integer|min:10|max:1000',
                 'is_active' => 'nullable|boolean',
                 'latitude' => 'nullable|numeric|between:-90,90',
                 'longitude' => 'nullable|numeric|between:-180,180',
@@ -554,6 +558,8 @@ class SettingsController extends Controller
             'country' => $request->country,
             'postal_code' => $request->postal_code,
             'has_time_clock' => $request->has_time_clock ?? false,
+            'allow_remote_clock' => $request->allow_remote_clock ?? false,
+            'max_distance_meters' => $request->max_distance_meters ?: 100,
             'branch_id' => $request->branch_id,
             'department_id' => $request->department_id,
             'company_id' => $company->id,
@@ -629,6 +635,8 @@ class SettingsController extends Controller
                 'department_id' => 'nullable|exists:departments,id',
                 'manager_id' => 'nullable|exists:users,id',
                 'has_time_clock' => 'nullable|boolean',
+                'allow_remote_clock' => 'nullable|boolean',
+                'max_distance_meters' => 'nullable|integer|min:10|max:1000',
                 'is_active' => 'nullable|boolean',
                 'latitude' => 'nullable|numeric|between:-90,90',
                 'longitude' => 'nullable|numeric|between:-180,180',
@@ -656,6 +664,8 @@ class SettingsController extends Controller
             'country' => $request->country,
             'postal_code' => $request->postal_code,
             'has_time_clock' => $request->has_time_clock ?? false,
+            'allow_remote_clock' => $request->allow_remote_clock ?? false,
+            'max_distance_meters' => $request->max_distance_meters ?: 100,
             'branch_id' => $request->branch_id,
             'department_id' => $request->department_id,
             'manager_id' => $request->manager_id,
@@ -1617,7 +1627,8 @@ class SettingsController extends Controller
                 'description' => $department->description,
                 'branch_id' => $department->branch_id,
                 'manager_id' => $department->manager_id,
-                'is_active' => $department->is_active
+                'is_active' => $department->is_active,
+                'min_staff_present' => $department->min_staff_present ?? DepartmentStaffingGuard::DEFAULT_MIN_STAFF_PRESENT
             ]
         ]);
     }
@@ -1640,7 +1651,8 @@ class SettingsController extends Controller
             'description' => 'nullable|string',
             'manager_id' => 'nullable|exists:users,id',
             'branch_id' => 'nullable|exists:branches,id',
-            'is_active' => 'nullable|boolean'
+            'is_active' => 'nullable|boolean',
+            'min_staff_present' => 'nullable|integer|min:0|max:999'
         ], [
             'manager_id.unique' => 'Ce gestionnaire est déjà assigné à un autre service.'
         ]);
@@ -1653,7 +1665,7 @@ class SettingsController extends Controller
             'branch_id' => $request->branch_id,
             'company_id' => $company->id,
             'is_active' => $request->is_active
-        ]);
+        ] + $this->minStaffPresentData($request));
 
         return redirect()->back()->with('success', 'Service créé avec succès.');
     }
@@ -1681,7 +1693,8 @@ class SettingsController extends Controller
             'description' => 'nullable|string',
             'manager_id' => 'nullable|exists:users,id',
             'branch_id' => 'nullable|exists:branches,id',
-            'is_active' => 'nullable|boolean'
+            'is_active' => 'nullable|boolean',
+            'min_staff_present' => 'nullable|integer|min:0|max:999'
         ], [
             'manager_id.unique' => 'Ce gestionnaire est déjà assigné à un autre service.'
         ]);
@@ -1693,9 +1706,25 @@ class SettingsController extends Controller
             'manager_id' => $request->manager_id,
             'branch_id' => $request->branch_id,
             'is_active' => $request->is_active
-        ]);
+        ] + $this->minStaffPresentData($request));
 
         return redirect()->back()->with('success', 'Service mis à jour avec succès.');
+    }
+
+    /**
+     * Effectif minimum présent du service, ignoré tant que sa colonne n'existe pas.
+     */
+    private function minStaffPresentData(Request $request): array
+    {
+        if (!Schema::hasColumn('departments', 'min_staff_present')) {
+            return [];
+        }
+
+        return [
+            'min_staff_present' => $request->filled('min_staff_present')
+                ? (int) $request->min_staff_present
+                : DepartmentStaffingGuard::DEFAULT_MIN_STAFF_PRESENT,
+        ];
     }
 
     /**

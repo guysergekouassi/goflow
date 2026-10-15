@@ -12,6 +12,7 @@ use Modules\Time\Models\TimeSheet;
 use Modules\Leaves\Models\Leave;
 use App\Models\PaiePeriode;
 use App\Models\PaieExercice;
+use App\Services\DepartmentStaffingGuard;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -93,7 +94,27 @@ class DemandeController extends Controller
                     'message' => 'Cette demande a déjà été traitée'
                 ]);
             }
-            
+
+            // Le département doit garder son effectif minimum, sauf dérogation motivée du RH
+            $guard = app(DepartmentStaffingGuard::class);
+            $effectif = $isLeave ? $guard->checkLeave($demande) : $guard->checkDemande($demande);
+
+            if (!$effectif['ok']) {
+                $motif = trim((string) $request->input('effectif_derogation'));
+
+                if ($motif === '') {
+                    DB::rollBack();
+
+                    return response()->json([
+                        'success' => false,
+                        'effectif_conflit' => true,
+                        'message' => $effectif['message'],
+                    ]);
+                }
+
+                $guard->recordDerogation($demande, $motif, Auth::id());
+            }
+
             // Période : celle choisie par le valideur, sinon on la déduit des
             // dates de la demande. Une entreprise qui n'a pas encore configuré
             // sa paie n'a aucune période : la validation reste possible sans,

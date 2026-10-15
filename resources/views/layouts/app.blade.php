@@ -744,6 +744,13 @@
             z-index: 99999 !important;
         }
 
+        /* SweetAlert2 cache ses boutons inutiles (« No », « Annuler »…) par un style
+           inline display:none, que le « .btn { display: inline-flex !important } »
+           de themes/core.css écrasait : on rétablit le masquage. */
+        .swal2-actions .btn[style*="display: none"] {
+            display: none !important;
+        }
+
         /* Si vous utilisez Bootstrap */
         .modal-backdrop {
             z-index: 1040 !important;
@@ -903,6 +910,8 @@
                             <span class="item-label">Pointage collectif</span>
                         </a>
 
+                        @include('time::pointages-hors-site.menu-item')
+
                     @elseif(auth()->user()->type === 'employee')
 
                         <a href="{{ route('employee.dashboard') }}"
@@ -910,6 +919,9 @@
                             <div class="item-icon"><i class="fas fa-home"></i></div>
                             <span class="item-label">Dashboard Employé</span>
                         </a>
+
+                        {{-- Un employé désigné gestionnaire d'un service ou d'une succursale valide les pointages hors site de son équipe --}}
+                        @include('time::pointages-hors-site.menu-item')
 
                     @endif
                 </div><!-- /sidebar-main-view -->
@@ -976,6 +988,16 @@
                             <a href="{{ route('company.times.qrcode-pointage.collective') }}"
                                 class="submenu-item {{ $qrRouteName === 'company.times.qrcode-pointage.collective' ? 'active' : '' }}">
                                 <i class="fas fa-users"></i> Pointage collectif
+                            </a>
+                        @endif
+                        @if(\Modules\Time\Models\PointageHorsSite::menuVisibleFor(Auth::user()))
+                            @php $horsSiteEnAttente = \Modules\Time\Models\PointageHorsSite::pendingCountFor(Auth::user()); @endphp
+                            <a href="{{ route('company.times.pointages-hors-site.index') }}"
+                                class="submenu-item {{ Str::contains(Request::route()->getName(), 'company.times.pointages-hors-site.') ? 'active' : '' }}">
+                                <i class="fas fa-map-marker-alt"></i> Pointages hors site
+                                @if($horsSiteEnAttente > 0)
+                                    <span class="badge bg-danger rounded-pill ms-1">{{ $horsSiteEnAttente }}</span>
+                                @endif
                             </a>
                         @endif
                         <a href="{{ route('company.times.holidays.index') }}"

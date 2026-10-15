@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\PaiePeriode;
 use App\Models\PaieExercice;
 use App\Services\TimeTrackingService;
+use App\Services\WeeklyAttendanceReport;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -1329,5 +1330,22 @@ class TimeController extends Controller
         $topWorkers = array_slice($topWorkers, 0, 10);
 
         return view('time::qrcode-pointage.reports', compact('topLates', 'topAbsences', 'topWorkers', 'period', 'startDate', 'endDate'));
+    }
+
+    /**
+     * Aperçu du rapport hebdomadaire envoyé à l'admin chaque vendredi
+     * (semaine en cours, ou celle du ?date=AAAA-MM-JJ).
+     */
+    public function weeklyReportPdf(Request $request, WeeklyAttendanceReport $service)
+    {
+        $company = \App\Models\Company::findOrFail(Auth::user()->company_id);
+        $reference = $request->filled('date') ? Carbon::parse($request->date) : Carbon::today();
+
+        $rapport = $service->build($company, $reference);
+
+        return response($service->pdf($rapport), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="rapport-presence-' . $rapport['debut']->format('Y-m-d') . '.pdf"',
+        ]);
     }
 }

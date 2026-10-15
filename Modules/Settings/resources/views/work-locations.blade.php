@@ -22,6 +22,9 @@
                     <a href="{{ route('company.settings.config') }}" class="btn btn-outline-info">
                         <i class="fas fa-arrow-left me-1"></i>Retour
                     </a>
+                    <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#importSitesModal">
+                        <i class="fas fa-file-import me-1"></i>Importer des sites clients
+                    </button>
                     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createWorkLocationModal">
                         <i class="fas fa-plus me-1"></i>Nouvel Emplacement
                     </button>
@@ -255,8 +258,6 @@
                                 <input type="hidden" id="state" name="state">
                                 <input type="hidden" id="country" name="country">
                                 <input type="hidden" id="postal_code" name="postal_code">
-                                <input type="hidden" id="latitude" name="latitude">
-                                <input type="hidden" id="longitude" name="longitude">
                                 <button class="btn btn-outline-secondary" type="button" id="clear_address">
                                     <i class="fas fa-times"></i>
                                 </button>
@@ -282,6 +283,20 @@
                         <div class="col-md-4 mb-3">
                             <label class="form-label">Pays</label>
                             <input type="text" class="form-control" id="country_display" placeholder="France" readonly>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Latitude (GPS)</label>
+                            <input type="text" class="form-control" id="latitude" name="latitude" inputmode="decimal" placeholder="5.3600">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Longitude (GPS)</label>
+                            <input type="text" class="form-control" id="longitude" name="longitude" inputmode="decimal" placeholder="-4.0083">
+                        </div>
+                        <div class="col-12 mb-3">
+                            <small class="text-muted">Remplies par la recherche d'adresse, souvent approximative. Pour le pointage GPS d'un site client, saisissez la position exacte du bâtiment : sur Google Maps, clic droit sur le bâtiment, cliquez sur les coordonnées pour les copier, puis collez-les dans le champ Latitude.</small>
                         </div>
                     </div>
 
@@ -428,8 +443,6 @@
                                 <input type="hidden" id="edit_state" name="state">
                                 <input type="hidden" id="edit_country" name="country">
                                 <input type="hidden" id="edit_postal_code" name="postal_code">
-                                <input type="hidden" id="edit_latitude" name="latitude">
-                                <input type="hidden" id="edit_longitude" name="longitude">
                                 <button class="btn btn-outline-secondary" type="button" id="edit_clear_address">
                                     <i class="fas fa-times"></i>
                                 </button>
@@ -455,6 +468,20 @@
                         <div class="col-md-4 mb-3">
                             <label class="form-label">Pays</label>
                             <input type="text" class="form-control" id="edit_country_display" placeholder="France" readonly>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Latitude (GPS)</label>
+                            <input type="text" class="form-control" id="edit_latitude" name="latitude" inputmode="decimal" placeholder="5.3600">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Longitude (GPS)</label>
+                            <input type="text" class="form-control" id="edit_longitude" name="longitude" inputmode="decimal" placeholder="-4.0083">
+                        </div>
+                        <div class="col-12 mb-3">
+                            <small class="text-muted">Pour le pointage GPS d'un site client, saisissez la position exacte du bâtiment : sur Google Maps, clic droit sur le bâtiment, cliquez sur les coordonnées pour les copier, puis collez-les dans le champ Latitude.</small>
                         </div>
                     </div>
 
@@ -565,6 +592,121 @@
         </div>
     </div>
 </div>
+
+<!-- Modal d'import des sites clients -->
+<div class="modal fade" id="importSitesModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">📥 Importer des sites clients</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ route('company.settings.work-locations.import.preview') }}" enctype="multipart/form-data"
+                  onsubmit="this.querySelector('[type=submit]').disabled = true; this.querySelector('[type=submit]').innerHTML = 'Vérification en cours…';">
+                @csrf
+                <div class="modal-body">
+                    <ol class="ps-3 mb-3">
+                        <li class="mb-1">
+                            <a href="{{ route('company.settings.work-locations.import.template') }}">Téléchargez le modèle</a>
+                            et remplissez une ligne par client.
+                        </li>
+                        <li class="mb-1">
+                            <strong>Coordonnées GPS</strong> : sur Google Maps, clic droit sur le bâtiment, cliquez sur les coordonnées
+                            pour les copier (ex. <code>5.3615428, -3.9911651</code>) et collez-les dans la colonne.
+                            Sans coordonnées, la position est déduite de l'adresse, mais elle est souvent approximative.
+                        </li>
+                        <li class="mb-1">Rayon et horaires sont facultatifs (100 m, 08:00–09:30 et 17:00–18:30 par défaut).</li>
+                        <li>Déposez le fichier : rien n'est enregistré avant votre confirmation.</li>
+                    </ol>
+                    <input type="file" class="form-control" name="file" accept=".xlsx,.xls,.csv,.ods" required>
+                    <small class="text-muted">Les sites importés sont de type « Site Client », ouverts au pointage à distance.</small>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <button type="submit" class="btn btn-primary">Vérifier le fichier</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@if(session('import_apercu'))
+    @php
+        $apercu = collect(session('import_apercu')['lignes']);
+        $nbImportables = $apercu->whereIn('statut', ['ok', 'avertissement'])->count();
+        $badges = [
+            'ok' => ['success', 'Prêt'],
+            'avertissement' => ['warning', 'À vérifier'],
+            'doublon' => ['secondary', 'Déjà existant'],
+            'erreur' => ['danger', 'Erreur'],
+        ];
+    @endphp
+    <!-- Modal d'aperçu de l'import -->
+    <div class="modal fade" id="importApercuModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Vérification du fichier</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-3">
+                        <span class="badge bg-success">{{ $apercu->where('statut', 'ok')->count() }} prêt(s)</span>
+                        <span class="badge bg-warning">{{ $apercu->where('statut', 'avertissement')->count() }} à vérifier</span>
+                        <span class="badge bg-secondary">{{ $apercu->where('statut', 'doublon')->count() }} déjà existant(s)</span>
+                        <span class="badge bg-danger">{{ $apercu->where('statut', 'erreur')->count() }} en erreur</span>
+                    </p>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr><th>Ligne</th><th>Client</th><th>Position</th><th>Rayon</th><th>Horaires</th><th>Statut</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach($apercu as $l)
+                                    @php [$couleur, $libelle] = $badges[$l['statut']]; $d = $l['data']; @endphp
+                                    <tr>
+                                        <td>{{ $l['ligne'] }}</td>
+                                        <td>
+                                            <strong>{{ $d['name'] ?: '—' }}</strong>
+                                            <div class="small text-muted">{{ trim(($d['address'] ?? '') . ' ' . ($d['city'] ?? '')) }}</div>
+                                        </td>
+                                        <td class="small">
+                                            @if($d['latitude'] !== null)
+                                                <a href="https://www.google.com/maps?q={{ $d['latitude'] }},{{ $d['longitude'] }}" target="_blank">
+                                                    {{ $d['latitude'] }}, {{ $d['longitude'] }}
+                                                </a>
+                                            @else
+                                                —
+                                            @endif
+                                        </td>
+                                        <td>{{ $d['max_distance_meters'] }} m</td>
+                                        <td class="small">{{ $d['check_in_start'] ?? '?' }}–{{ $d['check_in_end'] ?? '?' }} / {{ $d['check_out_start'] ?? '?' }}–{{ $d['check_out_end'] ?? '?' }}</td>
+                                        <td>
+                                            <span class="badge bg-{{ $couleur }}">{{ $libelle }}</span>
+                                            @foreach($l['messages'] as $message)
+                                                <div class="small text-{{ $l['statut'] === 'erreur' ? 'danger' : 'muted' }}">{{ $message }}</div>
+                                            @endforeach
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <form method="POST" action="{{ route('company.settings.work-locations.import.confirm') }}">
+                        @csrf
+                        <input type="hidden" name="jeton" value="{{ session('import_apercu')['jeton'] }}">
+                        <button type="submit" class="btn btn-primary" {{ $nbImportables === 0 ? 'disabled' : '' }}>
+                            Importer {{ $nbImportables }} site(s) client(s)
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+@endif
 @endsection
 
 @push('styles')
@@ -765,20 +907,18 @@
 
 @push('scripts')
 <script>
-    // Gestion de l'affichage des paramètres de pointeuse
+    // Le rayon (distance max) ne concerne que le pointage à distance géolocalisé
     document.addEventListener('DOMContentLoaded', function() {
-        const hasTimeClockCheckbox = document.getElementById('hasTimeClock');
-        const timeClockSettings = document.getElementById('timeClockSettings');
+        [['allowRemoteClock', 'timeClockSettings'], ['editAllowRemoteClock', 'editTimeClockSettings']].forEach(function(ids) {
+            const checkbox = document.getElementById(ids[0]);
+            const settings = document.getElementById(ids[1]);
 
-        if (hasTimeClockCheckbox) {
-            hasTimeClockCheckbox.addEventListener('change', function() {
-                if (this.checked) {
-                    timeClockSettings.style.display = 'block';
-                } else {
-                    timeClockSettings.style.display = 'none';
-                }
-            });
-        }
+            if (checkbox && settings) {
+                checkbox.addEventListener('change', function() {
+                    settings.style.display = this.checked ? 'block' : 'none';
+                });
+            }
+        });
     });
 
     function generateQRCode(locationId) {
@@ -860,13 +1000,9 @@
         document.getElementById('edit_check_out_start').value = parseTime(locationData.check_out_start) || '17:00';
         document.getElementById('edit_check_out_end').value = parseTime(locationData.check_out_end) || '18:30';
 
-        // Pointeuse GPS
-        if (locationData.has_time_clock) {
-            document.getElementById('editTimeClockSettings').style.display = 'block';
-            document.getElementById('edit_max_distance_meters').value = locationData.max_distance_meters || '100';
-        } else {
-            document.getElementById('editTimeClockSettings').style.display = 'none';
-        }
+        // Pointage à distance GPS : le rayon est toujours rechargé, sinon l'enregistrement l'écraserait
+        document.getElementById('edit_max_distance_meters').value = locationData.max_distance_meters || '100';
+        document.getElementById('editTimeClockSettings').style.display = locationData.allow_remote_clock ? 'block' : 'none';
 
         // Mettre à jour l'action du formulaire
         document.getElementById('editWorkLocationForm').action = `{{ url('/company/settings/work-locations') }}/${id}`;
@@ -1040,8 +1176,11 @@
             countryField.value = result.country || '';
             postalCodeField.value = result.postal_code || '';
 
-            // Gérer les coordonnées GPS
-            if (result.latitude && result.longitude && !isNaN(result.latitude) && !isNaN(result.longitude)) {
+            // Gérer les coordonnées GPS, sauf celles saisies à la main (position exacte du bâtiment)
+            const coordsManuelles = latitudeField.dataset.manuel === '1' && latitudeField.value.trim() !== '' && longitudeField.value.trim() !== '';
+            if (coordsManuelles) {
+                // La recherche d'adresse ne remplace pas une position saisie à la main
+            } else if (result.latitude && result.longitude && !isNaN(result.latitude) && !isNaN(result.longitude)) {
                 latitudeField.value = result.latitude;
                 longitudeField.value = result.longitude;
             } else {
@@ -1062,7 +1201,7 @@
             if (result.state) stateField.setAttribute('name', 'state');
             if (result.country) countryField.setAttribute('name', 'country');
             if (result.postal_code) postalCodeField.setAttribute('name', 'postal_code');
-            if (result.latitude && result.longitude && !isNaN(result.latitude) && !isNaN(result.longitude)) {
+            if (coordsManuelles || (result.latitude && result.longitude && !isNaN(result.latitude) && !isNaN(result.longitude))) {
                 latitudeField.setAttribute('name', 'latitude');
                 longitudeField.setAttribute('name', 'longitude');
             }
@@ -1082,8 +1221,13 @@
             stateField.value = '';
             countryField.value = '';
             postalCodeField.value = '';
-            latitudeField.value = '';
-            longitudeField.value = '';
+
+            // Les coordonnées saisies à la main sont conservées : seule l'adresse est effacée
+            const coordsManuelles = latitudeField.dataset.manuel === '1' && latitudeField.value.trim() !== '' && longitudeField.value.trim() !== '';
+            if (!coordsManuelles) {
+                latitudeField.value = '';
+                longitudeField.value = '';
+            }
 
             cityDisplay.value = '';
             stateDisplay.value = '';
@@ -1091,7 +1235,7 @@
             postalCodeDisplay.value = '';
 
             // Supprimer les attributs name des champs vides
-            const emptyFields = ['address', 'city', 'state', 'country', 'postal_code', 'latitude', 'longitude'];
+            const emptyFields = ['address', 'city', 'state', 'country', 'postal_code'].concat(coordsManuelles ? [] : ['latitude', 'longitude']);
             emptyFields.forEach(fieldId => {
                 const field = document.getElementById(fieldId);
                 if (field) {
@@ -1156,6 +1300,38 @@
                 autocompleteInput.setCustomValidity('');
             });
         }
+    });
+
+    // Coordonnées collées depuis Google Maps (« 5.3600, -4.0083 ») : répartir latitude / longitude
+    document.addEventListener('DOMContentLoaded', function() {
+        [['latitude', 'longitude'], ['edit_latitude', 'edit_longitude']].forEach(function(ids) {
+            const latInput = document.getElementById(ids[0]);
+            const lngInput = document.getElementById(ids[1]);
+            if (!latInput || !lngInput) return;
+
+            // Marque une saisie à la main, que la recherche d'adresse ne doit plus écraser
+            const marquerManuel = function() { latInput.dataset.manuel = '1'; };
+            latInput.addEventListener('input', marquerManuel);
+            lngInput.addEventListener('input', marquerManuel);
+
+            latInput.addEventListener('paste', function(e) {
+                const parts = (e.clipboardData || window.clipboardData).getData('text').split(',').map(function(p) { return p.trim(); });
+                if (parts.length === 2 && parts.every(function(p) { return p !== '' && !isNaN(p); })) {
+                    e.preventDefault();
+                    marquerManuel();
+                    latInput.value = parts[0];
+                    lngInput.value = parts[1];
+                    latInput.setAttribute('name', 'latitude');
+                    lngInput.setAttribute('name', 'longitude');
+                }
+            });
+        });
+    });
+
+    // Retour de la vérification d'un fichier d'import : afficher le résultat
+    document.addEventListener('DOMContentLoaded', function() {
+        const apercu = document.getElementById('importApercuModal');
+        if (apercu) new bootstrap.Modal(apercu).show();
     });
 </script>
 @endpush

@@ -16,11 +16,13 @@ class Department extends Model
         'manager_id',
         'branch_id',
         'company_id',
-        'is_active'
+        'is_active',
+        'min_staff_present'
     ];
 
     protected $casts = [
-        'is_active' => 'boolean'
+        'is_active' => 'boolean',
+        'min_staff_present' => 'integer'
     ];
 
     /**

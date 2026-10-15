@@ -59,6 +59,17 @@
                         </div>
                     </div>
                 </div>
+
+                @if(isset($effectif) && $effectif && !$effectif['ok'])
+                    <div class="alert alert-warning mt-3 mb-2">{{ $effectif['message'] }}</div>
+                    <div class="form-group">
+                        <label for="effectif_derogation" class="form-label">Motif de dérogation <small class="text-muted">(obligatoire pour approuver)</small></label>
+                        <textarea class="form-control @error('effectif_derogation') is-invalid @enderror"
+                            id="effectif_derogation" name="effectif_derogation"
+                            rows="2"
+                            placeholder="Ex. : urgence familiale, remplaçant prévu…">{{ old('effectif_derogation') }}</textarea>
+                    </div>
+                @endif
             </div>
         </div>
     </div>

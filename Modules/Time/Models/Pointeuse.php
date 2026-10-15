@@ -35,7 +35,11 @@ class Pointeuse extends Model
         'status',
         'company_id',
         'scan_status',
-        'duree_retard'
+        'duree_retard',
+        'latitude',
+        'longitude',
+        'gps_accuracy',
+        'distance_site'
     ];
 
     public function employee(){

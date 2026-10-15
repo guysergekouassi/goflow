@@ -161,7 +161,8 @@ $title = ($leave->employee->gender == 'Male') ? 'Monsieur' : (($leave->employee-
                                     $LeaveMonth = '';
                                     $salaires = json_decode($leave->sb_leave, true);
                                     $jours = json_decode($leave->days_leave, true);
-                                    $monthsLeave = json_decode($leave->month_leave, true);
+                                    // Congé demandé depuis le mobile : pas de ventilation par mois
+                                    $monthsLeave = !empty($leave->month_leave) ? (json_decode($leave->month_leave, true) ?: []) : [];
                                 @endphp
 
                                 @foreach ($monthsLeave as $moisNum => $moisDate)

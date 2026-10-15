@@ -60,6 +60,7 @@ Route::middleware(['auth', 'maintenance'])->prefix('company')->name('company.')-
         
         // Rapport et statistiques
         Route::get('reports', [TimeController::class, 'reports'])->name('reports');
+        Route::get('reports/hebdo-pdf', [TimeController::class, 'weeklyReportPdf'])->name('reports.weekly-pdf');
     });
 
     // ─── Portail QR Code Unique par Succursale (Branch Portal) ───────────────
@@ -70,6 +71,13 @@ Route::middleware(['auth', 'maintenance'])->prefix('company')->name('company.')-
         // Même pointage collectif, mais intégré au back-office (layout dashboard).
         // Le portail ci-dessus reste dédié au scan QR sur mobile / tablette.
         Route::get('collectif', [\Modules\Time\Http\Controllers\BranchPortalController::class, 'collective'])->name('collective');
+    });
+
+    // Pointages GPS hors des sites connus, validés par le supérieur hiérarchique.
+    // Ouvert à tout compte connecté : le contrôleur borne la liste à ce qui lui est confié.
+    Route::prefix('times/pointages-hors-site')->name('times.pointages-hors-site.')->group(function () {
+        Route::get('/', [\Modules\Time\Http\Controllers\PointageHorsSiteController::class, 'index'])->name('index');
+        Route::post('{id}/decision', [\Modules\Time\Http\Controllers\PointageHorsSiteController::class, 'decide'])->name('decide');
     });
 });
 

@@ -11,6 +11,7 @@ use Modules\Leaves\Models\LeaveType;
 use App\Models\PaieExercice;
 use App\Models\PaiePeriode;
 use App\Models\Allowance;
+use App\Services\DepartmentStaffingGuard;
 use Modules\PaieSalaries\Models\PaySlip;
 use Modules\Time\Models\TimeSheet;
 use Illuminate\Support\Facades\Auth;
@@ -194,8 +195,13 @@ class LeavesController extends Controller
             ])
             ->where('company_id', $user->company_id)
             ->findOrFail($id);
-            
-        return view('leaves::show', compact('leave'));
+
+        // Prévenir le RH avant qu'il n'accorde un congé qui viderait le département
+        $effectif = in_array($leave->status, ['Pending', 'En attente'])
+            ? app(DepartmentStaffingGuard::class)->checkLeave($leave)
+            : null;
+
+        return view('leaves::show', compact('leave', 'effectif'));
     }
     
     /**
@@ -320,14 +326,30 @@ class LeavesController extends Controller
     {
         $request->validate([
             'status' => 'required|in:Approuvé,Rejeté',
-            'leave_reason' => 'nullable|string|max:1000'
+            'leave_reason' => 'nullable|string|max:1000',
+            'effectif_derogation' => 'nullable|string|max:1000'
         ]);
-        
+
         $user = Auth::user();
         $leave = Leave::where('company_id', $user->company_id)
             ->findOrFail($id);
 
         $wasApproved = $leave->status === 'Approuvé';
+
+        // Le département doit garder son effectif minimum, sauf dérogation motivée du RH
+        if ($request->status === 'Approuvé' && !in_array($leave->status, ['Approuvé', 'Démarré'])) {
+            $guard = app(DepartmentStaffingGuard::class);
+            $effectif = $guard->checkLeave($leave);
+
+            if (!$effectif['ok']) {
+                if (!$request->filled('effectif_derogation')) {
+                    return redirect()->back()->withInput()->with('error', $effectif['message']
+                        . ' Pour l\'accorder quand même, indiquez un motif de dérogation.');
+                }
+
+                $guard->recordDerogation($leave, $request->effectif_derogation, $user->id);
+            }
+        }
 
         // Demande soumise depuis le mobile alors qu'aucune période de paie
         // n'existait : on la rattache maintenant si l'entreprise en a créé une.

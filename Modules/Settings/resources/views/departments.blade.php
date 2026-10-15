@@ -266,6 +266,12 @@
                         </div>
                     </div>
 
+                    <div class="mb-3">
+                        <label class="form-label">Effectif minimum présent</label>
+                        <input type="number" class="form-control" name="min_staff_present" value="1" min="0" max="999">
+                        <small class="text-muted">Une absence n'est accordée que s'il reste au moins ce nombre d'employés présents dans le service (dérogation possible avec motif). 0 = pas de contrôle.</small>
+                    </div>
+
                     <input type="hidden" name="is_active" value="0">
                     <div class="form-check">
                         <input class="form-check-input" type="checkbox" name="is_active" id="isActive" value="1" checked>
@@ -348,6 +354,12 @@
                                 <input type="hidden" name="manager_id" value="">
                             @endif
                         </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Effectif minimum présent</label>
+                        <input type="number" class="form-control" name="min_staff_present" id="editMinStaffPresent" value="1" min="0" max="999">
+                        <small class="text-muted">Une absence n'est accordée que s'il reste au moins ce nombre d'employés présents dans le service (dérogation possible avec motif). 0 = pas de contrôle.</small>
                     </div>
 
                     <input type="hidden" name="is_active" value="0" id="editIsActiveHidden">
@@ -541,6 +553,8 @@
                 if (editBranchId) editBranchId.value = department.branch_id || '';
                 if (editManagerId) editManagerId.value = department.manager_id || '';
                 if (editIsActive) editIsActive.checked = department.is_active;
+                const editMinStaffPresent = document.getElementById('editMinStaffPresent');
+                if (editMinStaffPresent) editMinStaffPresent.value = department.min_staff_present ?? 1;
                 if (editDepartmentForm) editDepartmentForm.action = `{{ url('/company/settings/departments') }}/${id}`;
 
                 // Réinitialiser Select2 si nécessaire

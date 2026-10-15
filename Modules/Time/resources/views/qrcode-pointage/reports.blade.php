@@ -34,6 +34,10 @@
                             <option value="last_month" {{ $period == 'last_month' ? 'selected' : '' }}>Mois précédent ({{ Carbon::now()->subMonth()->locale('fr')->isoFormat('MMMM YYYY') }})</option>
                             <option value="year" {{ $period == 'year' ? 'selected' : '' }}>Année en cours ({{ Carbon::now()->year }})</option>
                         </select>
+                        <a href="{{ route('company.times.qrcode-pointage.reports.weekly-pdf') }}" target="_blank"
+                           class="btn btn-outline-primary text-nowrap" title="Aperçu du rapport envoyé à l'admin chaque vendredi">
+                            <i class="fas fa-file-pdf me-1"></i> Rapport hebdo (PDF)
+                        </a>
                     </form>
                 </div>
             </div>

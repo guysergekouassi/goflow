@@ -78,6 +78,9 @@ use Modules\Loans\Services\LoanCalculatorService;
 use Illuminate\Support\Facades\Validator;
 use Modules\Settings\Models\WorkLocation;
 use App\Services\BranchScheduleResolver;
+use App\Services\DepartmentStaffingGuard;
+use App\Services\PointageHorsSiteService;
+use Modules\Time\Models\PointageHorsSite;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
 use Tymon\JWTAuth\Exceptions\TokenExpiredException;
@@ -86,6 +89,12 @@ use Illuminate\Support\Facades\RateLimiter;
 
 class ApiAppController extends Controller
 {
+    /** Pointage GPS : au-delà de cette imprécision (mètres), la position n'est pas fiable. */
+    private const GPS_MAX_ACCURACY_METERS = 100;
+
+    /** Rayon appliqué quand l'emplacement n'en précise pas (mètres). */
+    private const GPS_DEFAULT_RADIUS_METERS = 100;
+
     /**
      * Handle an incoming authentication request.
      *
@@ -2323,6 +2332,24 @@ class ApiAppController extends Controller
                 ], 404);
             }
 
+            // Le département doit garder son effectif minimum. Pas de dérogation depuis
+            // le mobile : le RH la motive depuis l'espace web.
+            $accorde = in_array($status, ['Approved', 'Approuvé']);
+            $dejaAccorde = in_array($demande->status, ['Approved', 'Approuvé', 'Démarré']);
+
+            if ($accorde && !$dejaAccorde) {
+                $guard = app(DepartmentStaffingGuard::class);
+                $effectif = $demande instanceof Leave ? $guard->checkLeave($demande) : $guard->checkDemande($demande);
+
+                if (!$effectif['ok']) {
+                    return response()->json([
+                        'status' => false,
+                        'message' => $effectif['message'] . ' Pour l\'accorder quand même, validez-la depuis l\'espace web en indiquant un motif de dérogation.',
+                        'effectif' => $effectif,
+                    ], 422);
+                }
+            }
+
             $demande->status = $status;
             $demande->save();
 
@@ -3366,6 +3393,262 @@ class ApiAppController extends Controller
         }
     }
 
+    /**
+     * Pointage à distance par géolocalisation (employé en service chez un client).
+     *
+     * L'application envoie la position GPS de l'employé. Le serveur retient
+     * l'emplacement le plus proche parmi ceux où le pointage à distance est
+     * autorisé (Configuration > Emplacements), et refuse le pointage si
+     * l'employé se trouve hors de son rayon.
+     */
+    public function gpsPointage(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'latitude' => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'accuracy' => 'required|numeric|min:0',
+            'mocked' => 'sometimes|boolean',
+            'type' => 'sometimes|string|in:entree,sortie',
+            'motif' => 'sometimes|nullable|string|max:500',
+            'device_info' => 'required|array',
+            'device_info.name' => 'required|string',
+            'device_info.model' => 'required|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Données invalides',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            $employee = Employee::where('user_id', $user->id)->first();
+
+            if (!$employee) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Employé non trouvé pour cet utilisateur'
+                ], 404);
+            }
+
+            if ((int) $employee->is_active !== 1) {
+                return response()->json([
+                    'success' => false,
+                    'message' => '⛔ Pointage refusé : votre contrat n\'est plus actif. Rapprochez-vous du service RH.'
+                ], 403);
+            }
+
+            // Android signale les positions fournies par une application de faux GPS.
+            // Contrairement à un pointage hors site, ce cas reste un refus.
+            if ($request->boolean('mocked')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => '⛔ Pointage refusé : une position GPS simulée a été détectée. Désactivez toute application de localisation fictive et réessayez.'
+                ], 403);
+            }
+
+            $accuracy = (int) round((float) $request->input('accuracy'));
+
+            if ($accuracy > self::GPS_MAX_ACCURACY_METERS) {
+                return response()->json([
+                    'success' => false,
+                    'message' => '📡 Position trop imprécise (± ' . $accuracy . ' m). Activez la localisation précise, rapprochez-vous d\'une fenêtre ou sortez, puis réessayez.',
+                    'gps_accuracy' => $accuracy,
+                ], 422);
+            }
+
+            // Emplacements ouverts au pointage à distance. Un emplacement rattaché à
+            // une succursale ou à un service reste réservé aux employés de celui-ci.
+            $sites = WorkLocation::where('company_id', $employee->company_id)
+                ->where('is_active', 1)
+                ->where('allow_remote_clock', 1)
+                ->whereNotNull('latitude')
+                ->whereNotNull('longitude')
+                ->where(function ($q) use ($employee) {
+                    $q->whereNull('branch_id')->orWhere('branch_id', $employee->branch_id);
+                })
+                ->where(function ($q) use ($employee) {
+                    $q->whereNull('department_id')->orWhere('department_id', $employee->department_id);
+                })
+                ->get();
+
+            $latitude = (float) $request->input('latitude');
+            $longitude = (float) $request->input('longitude');
+
+            $measured = $sites->map(fn ($site) => [
+                'site' => $site,
+                'distance' => (int) round($this->distanceEnMetres($latitude, $longitude, (float) $site->latitude, (float) $site->longitude)),
+                'rayon' => $site->max_distance_meters ?: self::GPS_DEFAULT_RADIUS_METERS,
+            ])->sortBy('distance')->values();
+
+            // Le site le plus proche dont l'employé est dans le rayon
+            $match = $measured->first(fn ($m) => $m['distance'] <= $m['rayon']);
+
+            // Hors de tout site connu (ou aucun site enregistré) : ce n'est pas une
+            // anomalie en soi (visite client, autre site…). Le pointage part en
+            // validation chez le supérieur hiérarchique au lieu d'être refusé.
+            if (!$match) {
+                return $this->pointageHorsSite($request, $employee, $latitude, $longitude, $accuracy, $measured->first());
+            }
+
+            $site = $match['site'];
+            $now = Carbon::now();
+            $pointageType = $request->input('type') ?: $this->determinerTypePointage($employee->id, $now);
+
+            // Retard / départ anticipé selon les horaires de l'emplacement
+            $evaluation  = app(BranchScheduleResolver::class)->evaluateScan($site, $pointageType, $now);
+            $scanStatus  = $evaluation['status'];
+            $dureeRetard = $evaluation['minutes'];
+
+            $statutScan = $this->formatScanStatus((object) [
+                'scan_status'  => $scanStatus,
+                'duree_retard' => $dureeRetard,
+            ]);
+
+            $company = User::find($employee->company_id);
+
+            Pointeuse::create([
+                'employee_id' => $employee->id,
+                'auth_date_time' => $now,
+                'auth_date' => $now->toDateString(),
+                'auth_time' => $now->toTimeString(),
+                'type' => $pointageType,
+                'direction' => $company->name ?? 'N/A',
+                'name_device' => 'Pointage GPS ' . ($request->device_info['name'] ?? ''),
+                'no_device' => $user->id,
+                'emp_id' => $employee->id,
+                'card_no' => 'N/A',
+                'name_emp' => $employee->name,
+                'location_id' => $site->id,
+                'latitude' => $latitude,
+                'longitude' => $longitude,
+                'gps_accuracy' => $accuracy,
+                'distance_site' => $match['distance'],
+                'status' => 1,
+                'company_id' => $employee->company_id,
+                'scan_status' => $scanStatus,
+                'duree_retard' => $dureeRetard,
+            ]);
+
+            if ($scanStatus === 'retard') {
+                $statusMsg = ' (En retard de ' . $dureeRetard . ' min)';
+            } elseif ($scanStatus === 'en_avance') {
+                $statusMsg = ' (En avance de ' . $dureeRetard . ' min)';
+            } else {
+                $statusMsg = ' (À l\'heure)';
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Pointage ' . ($pointageType === 'entree' ? 'entrée' : 'sortie') . ' chez « ' . $site->name . ' » enregistré avec succès' . $statusMsg,
+                'timestamp' => $now->toDateTimeString(),
+                'type' => $pointageType,
+                'location_id' => $site->id,
+                'site' => $site->name,
+                'distance' => $match['distance'],
+                'rayon' => $match['rayon'],
+                'scan_status' => $scanStatus,
+                'duree_retard' => $dureeRetard,
+                'statut_libelle' => $statutScan['libelle'],
+                'statut_couleur' => $statutScan['couleur'],
+            ], 201);
+
+        } catch (\Exception $e) {
+            \Log::error('Erreur pointage GPS: ' . $e->getMessage(), [
+                'user_id' => $user->id ?? null,
+                'latitude' => $request->input('latitude'),
+                'longitude' => $request->input('longitude'),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de l\'enregistrement du pointage: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Pointage GPS hors du rayon de tout site connu.
+     *
+     * Sans motif, l'application reçoit un 409 qui lui demande d'en saisir un.
+     * Avec un motif, le pointage est enregistré en attente et confié au
+     * supérieur hiérarchique (PointageHorsSiteService) : il ne compte qu'une
+     * fois validé.
+     *
+     * @param array|null $nearest site connu le plus proche : ['site', 'distance', 'rayon']
+     */
+    private function pointageHorsSite(Request $request, Employee $employee, float $latitude, float $longitude, int $accuracy, ?array $nearest)
+    {
+        $type = $request->input('type') ?: $this->determinerTypePointage($employee->id, Carbon::now());
+        $motif = trim((string) $request->input('motif', ''));
+
+        if ($nearest) {
+            $distanceTexte = $nearest['distance'] >= 1000
+                ? number_format($nearest['distance'] / 1000, 1, ',', ' ') . ' km'
+                : $nearest['distance'] . ' m';
+            $ou = 'vous êtes à ' . $distanceTexte . ' du site « ' . $nearest['site']->name . ' » (rayon autorisé : ' . $nearest['rayon'] . ' m)';
+        } else {
+            $ou = 'aucun site n\'est enregistré pour le pointage à distance';
+        }
+
+        $position = [
+            'site' => $nearest ? $nearest['site']->name : null,
+            'distance' => $nearest['distance'] ?? null,
+            'rayon' => $nearest['rayon'] ?? null,
+        ];
+
+        if (mb_strlen($motif) < 3) {
+            return response()->json([
+                'success' => false,
+                'hors_site' => true,
+                'motif_requis' => true,
+                'message' => '📍 Vous êtes hors des sites connus : ' . $ou . '. Indiquez le motif de votre présence ici (visite client, autre site…) : votre pointage sera envoyé à votre supérieur pour validation.',
+            ] + $position, 409);
+        }
+
+        $pointage = app(PointageHorsSiteService::class)->submit($employee, [
+            'type' => $type,
+            'latitude' => $latitude,
+            'longitude' => $longitude,
+            'accuracy' => $accuracy,
+            'nearest_location_id' => $nearest ? $nearest['site']->id : null,
+            'nearest_distance' => $nearest['distance'] ?? null,
+            'motif' => mb_substr($motif, 0, 500),
+            'device_name' => $request->device_info['name'] ?? null,
+        ]);
+
+        $validateur = $pointage->validator?->name;
+
+        return response()->json([
+            'success' => true,
+            'en_attente' => true,
+            'message' => 'Pointage ' . ($type === 'entree' ? 'entrée' : 'sortie') . ' enregistré hors site et envoyé '
+                . ($validateur ? 'à ' . $validateur : 'à votre supérieur') . ' pour validation. Il ne sera compté qu\'une fois validé.',
+            'pointage_hors_site_id' => $pointage->id,
+            'timestamp' => $pointage->pointed_at->toDateTimeString(),
+            'type' => $type,
+        ] + $position, 202);
+    }
+
+    /**
+     * Distance en mètres entre deux points GPS (formule de haversine).
+     */
+    private function distanceEnMetres(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        $earthRadius = 6371000;
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLng = deg2rad($lng2 - $lng1);
+
+        $a = sin($dLat / 2) ** 2
+            + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
+
+        return $earthRadius * 2 * atan2(sqrt($a), sqrt(1 - $a));
+    }
+
     public function generateTemporaryToken(Request $request)
     {
         try {
@@ -3954,5 +4237,128 @@ th{background:#f0c300;font-weight:bold;}
                 'details' => $error->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Pointages GPS hors site visibles par l'utilisateur connecté : toute
+     * l'entreprise pour le compte entreprise, sinon ceux qui lui sont confiés.
+     * Filtre `status` : en_attente (défaut), valide, refuse ou tous.
+     */
+    public function pointagesHorsSite(Request $request)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            $status = $request->input('status', PointageHorsSite::EN_ATTENTE);
+
+            $query = PointageHorsSite::with(['employee.department', 'nearestLocation', 'validator', 'decidedBy'])
+                ->visiblePar($user)
+                ->orderByDesc('pointed_at');
+
+            if (in_array($status, [PointageHorsSite::EN_ATTENTE, PointageHorsSite::VALIDE, PointageHorsSite::REFUSE], true)) {
+                $query->where('status', $status);
+            }
+
+            $service = app(PointageHorsSiteService::class);
+
+            return response()->json([
+                'success' => true,
+                'en_attente' => PointageHorsSite::visiblePar($user)->enAttente()->count(),
+                'data' => $query->limit(100)->get()->map(fn ($p) => $this->formatPointageHorsSite($p, $user, $service))->values(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Erreur pointagesHorsSite: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Impossible de charger les pointages hors site.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Décision du supérieur sur un pointage hors site : `valider` le recopie
+     * dans les pointages à son heure d'origine, `refuser` exige un commentaire
+     * transmis à l'employé.
+     */
+    public function decidePointageHorsSite(Request $request, $id)
+    {
+        $validator = Validator::make($request->all(), [
+            'decision' => 'required|in:valider,refuser',
+            'commentaire' => 'nullable|string|max:500|required_if:decision,refuser',
+        ], [
+            'commentaire.required_if' => 'Indiquez la raison du refus : elle sera transmise à l\'employé.',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => $validator->errors()->first(),
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            $service = app(PointageHorsSiteService::class);
+            $pointage = PointageHorsSite::find($id);
+
+            if (!$pointage || !$service->canDecide($user, $pointage)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Ce pointage est introuvable ou n\'est pas confié à votre compte.',
+                ], 404);
+            }
+
+            $valider = $request->input('decision') === 'valider';
+            $pointage = $service->decide($pointage, $user, $valider, $request->input('commentaire'));
+            $nom = $pointage->employee?->name ?? 'L\'employé';
+
+            return response()->json([
+                'success' => true,
+                'message' => $valider
+                    ? 'Pointage validé : il compte désormais dans les présences de ' . $nom . '.'
+                    : 'Pointage refusé. ' . $nom . ' en a été informé(e).',
+                'data' => $this->formatPointageHorsSite($pointage, $user, $service),
+            ]);
+        } catch (\RuntimeException $e) {
+            // Déjà traité (par un autre supérieur ou depuis l'espace web)
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 409);
+        } catch (\Exception $e) {
+            Log::error('Erreur decidePointageHorsSite: ' . $e->getMessage(), ['id' => $id]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de l\'enregistrement de la décision.',
+            ], 500);
+        }
+    }
+
+    private function formatPointageHorsSite(PointageHorsSite $p, User $user, PointageHorsSiteService $service): array
+    {
+        return [
+            'id' => $p->id,
+            'employee_id' => $p->employee_id,
+            'employee_name' => $p->employee?->name,
+            'department' => $p->employee?->department?->name,
+            'type' => $p->type,
+            'type_libelle' => $p->libelleType(),
+            'pointed_at' => $p->pointed_at?->toDateTimeString(),
+            'latitude' => $p->latitude,
+            'longitude' => $p->longitude,
+            'gps_accuracy' => $p->gps_accuracy,
+            'nearest_site' => $p->nearestLocation?->name,
+            'nearest_distance' => $p->nearest_distance,
+            'maps_url' => $p->mapsUrl(),
+            'motif' => $p->motif,
+            'scan_status' => $p->scan_status,
+            'duree_retard' => $p->duree_retard,
+            'status' => $p->status,
+            'status_libelle' => $p->libelleStatut(),
+            'validator_name' => $p->validator?->name,
+            'decided_by_name' => $p->decidedBy?->name,
+            'decided_at' => $p->decided_at?->toDateTimeString(),
+            'decision_comment' => $p->decision_comment,
+            'can_decide' => $p->status === PointageHorsSite::EN_ATTENTE && $service->canDecide($user, $p),
+        ];
     }
 }

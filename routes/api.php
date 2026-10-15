@@ -80,6 +80,10 @@ Route::middleware(['jwt.auth'])->group(function () {
     Route::get('/demandes', [ApiAppController::class, 'demandeRequest']);
     Route::get('/announcements-events', [ApiAppController::class, 'indexAnnoucements']);
     Route::post('/pointage/scanner', [ApiAppController::class, 'scannerPointage']);
+    Route::post('/pointage/gps', [ApiAppController::class, 'gpsPointage']);
+    // Pointages GPS hors site : liste et décision du supérieur (ou du compte entreprise)
+    Route::get('/pointages-hors-site', [ApiAppController::class, 'pointagesHorsSite']);
+    Route::post('/pointages-hors-site/{id}/decision', [ApiAppController::class, 'decidePointageHorsSite']);
     Route::get('payslip/GeneratePdf/{id}/{monthpaie?}', [ApiAppController::class, 'generatePdf'])->where('monthpaie', '.*');
     Route::get('payslip/viewBulletin/{id}/{monthpaie?}', [ApiAppController::class, 'viewBulletin']);
     Route::get('/notifications/unread-count-emp', [ApiAppController::class, 'getUnreadCountEmp']);
