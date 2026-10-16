@@ -1211,15 +1211,6 @@
                             class="submenu-item {{ Str::contains(Request::route()->getName(), 'company.settings.attendance-system') ? 'active' : '' }}">
                             <i class="fas fa-clock"></i> Système de présence
                         </a>
-                        <a href="{{ route('company.settings.documents') }}"
-                            class="submenu-item {{ Request::route()->getName() == 'company.settings.documents' ? 'active' : '' }}">
-                            <i class="fas fa-file-alt"></i> Documents Société
-                        </a>
-                        <div class="submenu-group-title"><i class="fas fa-minus"></i> Utilisateurs</div>
-                        <a href="{{ route('company.settings.users.index') }}"
-                            class="submenu-item {{ Request::route()->getName() == 'company.settings.users.index' || Request::route()->getName() == 'company.settings.users.create' || Request::route()->getName() == 'company.settings.users.edit' || Request::route()->getName() == 'company.settings.users.details' ? 'active' : '' }}">
-                            <i class="fas fa-users"></i> Listing des utilisateurs
-                        </a>
                     </div><!-- /submenu-view-config -->
                 @endif
 

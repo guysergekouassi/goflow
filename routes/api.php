@@ -19,6 +19,7 @@ use App\Http\Middleware\VerifyHubToken;
 Route::post('/login',[ApiAppController::class, 'login']);      
 Route::post('/login-with-code',[ApiAppController::class, 'loginCode']);
 Route::post('/login/employee',[ApiAppController::class, 'login']); // Route alternative pour employee
+Route::post('/refresh',[ApiAppController::class, 'refreshToken']); // Hors jwt.auth : accepte un token expiré
 Route::post('/verify-user-type',[ApiAppController::class, 'verifyUserType']);
 Route::post('/check-user-type',[ApiAppController::class, 'checkUserType']);
 

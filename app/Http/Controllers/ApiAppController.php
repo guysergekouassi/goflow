@@ -79,6 +79,7 @@ use Illuminate\Support\Facades\Validator;
 use Modules\Settings\Models\WorkLocation;
 use App\Services\BranchScheduleResolver;
 use App\Services\DepartmentStaffingGuard;
+use App\Services\AbsenceService;
 use App\Services\PointageHorsSiteService;
 use Modules\Time\Models\PointageHorsSite;
 use Tymon\JWTAuth\Facades\JWTAuth;
@@ -492,6 +493,51 @@ class ApiAppController extends Controller
             'status' => 'error',
             'message' => 'Erreur déconnexion, réessayer plus tard.'
         ], 500);
+    }
+
+    /**
+     * Renouvelle le token de l'application mobile, même expiré, pour que
+     * l'utilisateur reste connecté sans ressaisir son mot de passe.
+     *
+     * Le token reçu doit être authentique, non révoqué (déconnexion) et émis
+     * il y a moins de JWT_REFRESH_TTL minutes. Il est révoqué, et le nouveau
+     * token repart de zéro : la session dure tant que l'application est
+     * ouverte au moins une fois dans ce délai.
+     */
+    public function refreshToken()
+    {
+        $manager = JWTAuth::manager();
+
+        try {
+            $ancien = JWTAuth::parseToken()->getToken();
+
+            // Mode renouvellement : l'expiration est ignorée, la signature,
+            // la révocation et le délai de renouvellement sont vérifiés
+            $manager->setRefreshFlow();
+            $payload = $manager->decode($ancien);
+            $manager->invalidate($ancien);
+        } catch (JWTException $e) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Session expirée. Veuillez vous reconnecter.'
+            ], 401);
+        } finally {
+            $manager->setRefreshFlow(false);
+        }
+
+        $user = User::find($payload['sub']);
+
+        if (!$user || (int) ($user->is_active ?? 1) === 0) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Session expirée. Veuillez vous reconnecter.'
+            ], 401);
+        }
+
+        return response()->json([
+            'status' => true,
+            'token' => JWTAuth::fromUser($user),
+        ], 200);
     }
 
     /**
@@ -1190,8 +1236,40 @@ class ApiAppController extends Controller
             try {
                 $pointages = Pointeuse::where('emp_id', $employee->id)
                     ->whereBetween('auth_date', [$startDate, $endDate])
-                    ->orderBy('auth_date', 'desc')
-                    ->get();
+                    ->get()
+                    ->map(fn ($p) => [
+                        'date' => Carbon::parse($p->auth_date)->toDateString(),
+                        'heure' => $p->auth_time,
+                        'type' => $p->type,
+                        'device' => $p->name_device,
+                        'statut' => $this->formatScanStatus($p),
+                        'validation' => null,
+                    ]);
+
+                // Pointages GPS hors site pas encore comptés : en attente de la
+                // décision du supérieur, ou refusés. Un pointage validé est déjà
+                // recopié dans pointeuses.
+                if (PointageHorsSite::tableExiste()) {
+                    $horsSite = PointageHorsSite::where('employee_id', $employee->id)
+                        ->whereIn('status', [PointageHorsSite::EN_ATTENTE, PointageHorsSite::REFUSE])
+                        ->whereBetween('pointed_at', [$startDate . ' 00:00:00', $endDate . ' 23:59:59'])
+                        ->get()
+                        ->map(fn ($p) => [
+                            'date' => $p->pointed_at->toDateString(),
+                            'heure' => $p->pointed_at->toTimeString(),
+                            'type' => $p->type,
+                            'device' => 'Pointage GPS hors site ' . ($p->device_name ?? ''),
+                            'statut' => $this->formatScanStatus($p),
+                            'validation' => $p->status,
+                        ]);
+
+                    $pointages = $pointages->concat($horsSite);
+                }
+
+                // Jours du plus récent au plus ancien, pointages d'un même jour dans l'ordre de l'heure
+                $pointages = $pointages
+                    ->sort(fn ($a, $b) => [$b['date'], $a['heure']] <=> [$a['date'], $b['heure']])
+                    ->values();
             } catch (\Exception $e) {
                 \Log::error('Erreur SQL: ' . $e->getMessage());
                 return response()->json(['error' => 'Erreur lors de la récupération des données'], 500);
@@ -1201,7 +1279,7 @@ class ApiAppController extends Controller
             $resultat = [];
 
             foreach ($pointages as $pointage) {
-                $date = Carbon::parse($pointage->auth_date);
+                $date = Carbon::parse($pointage['date']);
                 $moisKey = $date->format('Y-m');
                 $semaineKey = $date->format('W');
                 $jourKey = $date->format('Y-m-d');
@@ -1232,17 +1310,19 @@ class ApiAppController extends Controller
                 }
 
                 // Ajout du pointage
-                $statut = $this->formatScanStatus($pointage);
+                $statut = $pointage['statut'];
 
                 $resultat[$moisKey]['semaines'][$semaineKey]['jours'][$jourKey]['pointages'][] = [
-                    'heure' => $pointage->auth_time,
-                    'type' => $pointage->type,
-                    'device' => $pointage->name_device,
+                    'heure' => $pointage['heure'],
+                    'type' => $pointage['type'],
+                    'device' => $pointage['device'],
                     // Statut du pointage : a_l_heure / retard / en_avance
                     'scan_status' => $statut['code'],
                     'statut_libelle' => $statut['libelle'],
                     'duree_retard' => $statut['duree_minutes'],
                     'statut_couleur' => $statut['couleur'],
+                    // null : pointage compté ; en_attente / refuse : pointage hors site non compté
+                    'validation' => $pointage['validation'],
                 ];
             }
 
@@ -1522,39 +1602,56 @@ class ApiAppController extends Controller
         }
     }
 
+    /**
+     * Résumé « Absence » du mobile : absences approuvées de l'employé sur le
+     * mois en cours, lues dans time_sheets comme les rapports de présence et la paie.
+     *
+     * Une absence se mesure en heures (8 h = 1 jour, comme le formulaire du
+     * web) : le total est renvoyé en jours entiers + heures restantes, pour
+     * l'affichage « 2 jours et 3 heures ». Une absence à cheval sur deux mois
+     * ne compte que pour sa part dans le mois en cours.
+     */
     public function CountHeuresAbsence(Request $request)
     {
         try {
             $user = JWTAuth::parseToken()->authenticate();
             $employee = Employee::where('user_id', $user->id)->first();
 
-            // Déterminer le début et la fin du mois en cours
-            $startOfMonth = new \DateTime('first day of this month');
-            $endOfMonth = new \DateTime('last day of this month');
+            $debutMois = now()->startOfMonth();
+            $finMois = now()->endOfMonth()->startOfDay();
 
-            // Récupérer toutes les absences de l'employé pour le mois en cours
-            $timesheets = TimeSheet::where('employee_id', $employee->user_id)
-                ->whereBetween('date', [$startOfMonth, $endOfMonth])
-                ->orWhereBetween('arrival_date', [$startOfMonth, $endOfMonth])
+            $absences = TimeSheet::where('employee_id', $employee->id)
+                ->where('statut', 'approved')
+                ->whereDate('date', '<=', $finMois)
+                ->where(function ($q) use ($debutMois) {
+                    $q->whereDate('arrival_date', '>=', $debutMois)
+                        ->orWhere(fn ($q) => $q->whereNull('arrival_date')->whereDate('date', '>=', $debutMois));
+                })
                 ->get();
 
-            $total_days = 0;
-            $total_hours = 0;
+            $heures = 0;
 
-            foreach ($timesheets as $timesheet) {
-                // Calculer les jours d'absence
-                $start = new \DateTime($timesheet->date);
-                $end = new \DateTime($timesheet->arrival_date);
-                $interval = $start->diff($end);
-                $total_days += $interval->days + 1; // Ajouter 1 pour inclure le jour de début
+            foreach ($absences as $absence) {
+                $debut = Carbon::parse($absence->date)->startOfDay();
+                $fin = Carbon::parse($absence->arrival_date ?: $absence->date)->startOfDay();
+                $joursTotal = (int) round($debut->diffInDays($fin)) + 1;
+                $joursDansMois = (int) round($debut->max($debutMois)->diffInDays($fin->min($finMois))) + 1;
 
-                // Ajouter les heures d'absence
-                $total_hours += $timesheet->hours;
+                // Heures saisies ; à défaut (anciennes lignes enregistrées à 0 h), la durée de l'absence
+                $heuresAbsence = (float) $absence->hours > 0
+                    ? (float) $absence->hours
+                    : ((float) $absence->retenue > 0 ? (float) $absence->retenue : $joursTotal) * AbsenceService::HEURES_PAR_JOUR;
+
+                $heures += $heuresAbsence * $joursDansMois / $joursTotal;
             }
 
+            // Arrondi avant le découpage : 15,9999 h (prorata) doit donner 2 jours, pas 1 jour et 8 h
+            $heures = round($heures, 1);
+            $jours = (int) floor($heures / AbsenceService::HEURES_PAR_JOUR);
+
             return response()->json([
-                'total_days' => $total_days,
-                'total_hours' => $total_hours
+                'total_days' => $jours,
+                'total_hours' => round($heures - $jours * AbsenceService::HEURES_PAR_JOUR, 1),
             ]);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Utilisateur non connecté.'], 401);
@@ -1629,7 +1726,8 @@ class ApiAppController extends Controller
     public function createLeaveRequest(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'leave_type_id' => 'required',
+            // Ignoré pour une absence : le serveur impose le type « Absence » de l'entreprise
+            'leave_type_id' => 'required_if:categorie_demandes,pret,autre',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
             'leave_reason' => 'required|string',
@@ -1719,7 +1817,9 @@ class ApiAppController extends Controller
 
             $leave = new Leave();
             $leave->employee_id = $employee->id;
-            $leave->leave_type_id = $request->leave_type_id;
+            // Les anciennes versions de l'app envoyaient le premier type de congé
+            // trouvé (souvent « Congé annuel », parfois d'une autre entreprise)
+            $leave->leave_type_id = app(AbsenceService::class)->typeFor((int) $employee->company_id)->id;
             $leave->periode_id = $periode ? $periode->id : null;
             $leave->created_by = $user->id;
             $leave->applied_on = now();
@@ -1736,7 +1836,7 @@ class ApiAppController extends Controller
 
             return response()->json([
                 'status' => true,
-                'message' => 'Demande de congé soumise avec succès',
+                'message' => 'Demande d\'absence soumise avec succès',
                 'data' => $leave
             ], 201);
         }
@@ -2350,8 +2450,18 @@ class ApiAppController extends Controller
                 }
             }
 
+            // Comme une approbation depuis le web : rattachement à la période de
+            // paie, puis inscription dans time_sheets (rapports, paie, résumé)
+            if ($demande instanceof Leave && $accorde && !$dejaAccorde && !$demande->periode_id) {
+                $demande->periode_id = $this->resolvePaiePeriode($demande->company_id, $demande->start_date)?->id;
+            }
+
             $demande->status = $status;
             $demande->save();
+
+            if ($demande instanceof Leave && $accorde && !$dejaAccorde) {
+                app(AbsenceService::class)->recordApproved($demande);
+            }
 
             return response()->json([
                 'status' => true,
@@ -3158,14 +3268,18 @@ class ApiAppController extends Controller
             // Logique horaire du QR unique par site, partagée avec le portail web
             $scheduleResolver = app(BranchScheduleResolver::class);
 
-            // 1) Extraire les identifiants depuis le contenu du QR code
+            // 1) Extraire les identifiants depuis le contenu du QR code. Seuls les QR
+            //    générés par GP-FLOW sont acceptés : un autre code (site web, wifi,
+            //    étiquette produit…) ne doit jamais permettre de pointer.
             $qrParts = explode(':', $qrData);
+            $qrLegacy = count($qrParts) >= 3 && $qrParts[0] === 'pointage';
+            $cheminQr = (string) parse_url($qrData, PHP_URL_PATH);
 
-            if (count($qrParts) >= 3 && $qrParts[0] === 'pointage') {
+            if ($qrLegacy) {
                 // Format legacy : pointage:location_id:timestamp
                 $locationId = $qrParts[1];
-            } else {
-                // Format URL (absolue ou relative) : ...?branch_id=X ou ...?location_id=Y
+            } elseif (preg_match('#/(pointage/scanner|qrcode-pointage/[\w-]+)/?$#', $cheminQr)) {
+                // Format URL (absolue ou relative) : .../pointage/scanner?branch_id=X ou ?location_id=Y
                 $queryString = parse_url($qrData, PHP_URL_QUERY);
                 if ($queryString) {
                     parse_str($queryString, $query);
@@ -3175,10 +3289,13 @@ class ApiAppController extends Controller
                 }
             }
 
-            // 2) Repli : identifiants transmis explicitement par l'application
-            if (!$locationId && !$branchId) {
-                $locationId = $request->input('location_id') ?: null;
-                $branchId   = $request->input('site_id') ?: null;
+            // 2) Ni format legacy, ni URL de pointage avec un identifiant de site :
+            //    ce code n'a pas été généré par GP-FLOW.
+            if (!$qrLegacy && !$locationId && !$branchId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => '⛔ QR Code non reconnu : ce code n\'a pas été généré par GP-FLOW. Scannez le QR Code de pointage de votre lieu de travail.'
+                ], 400);
             }
 
             // 2 bis) Les QR "1 QR = 1 succursale" transportent un location_id sentinelle
@@ -3258,9 +3375,9 @@ class ApiAppController extends Controller
                 }
             }
 
-            // 4) Dernier recours : QR legacy sans identifiant de site. Accepté uniquement
-            //    si l'entreprise n'a qu'un seul emplacement actif (aucune ambiguïté possible).
-            if (!$locationId && !$branchId) {
+            // 4) Dernier recours : QR legacy (pointage::…) sans identifiant de site. Accepté
+            //    uniquement si l'entreprise n'a qu'un seul emplacement actif (aucune ambiguïté possible).
+            if ($qrLegacy && !$locationId && !$branchId) {
                 $activeLocations = WorkLocation::where('company_id', $employee->company_id)
                     ->where('is_active', 1)
                     ->get();
@@ -3286,6 +3403,10 @@ class ApiAppController extends Controller
             // Déterminer le type de pointage
             $now = Carbon::now();
             $pointageType = $typeFromRequest ?: $this->determinerTypePointage($employee->id, $now);
+
+            if ($refus = $this->refusEnchainementPointage($employee, $pointageType, $now)) {
+                return response()->json(['success' => false, 'message' => $refus], 409);
+            }
 
             $scannedLocation = null;
 
@@ -3439,6 +3560,17 @@ class ApiAppController extends Controller
                     'success' => false,
                     'message' => '⛔ Pointage refusé : votre contrat n\'est plus actif. Rapprochez-vous du service RH.'
                 ], 403);
+            }
+
+            // Mêmes règles d'entrée / sortie que le scan QR
+            $maintenant = Carbon::now();
+            $refus = $this->refusEnchainementPointage(
+                $employee,
+                $request->input('type') ?: $this->determinerTypePointage($employee->id, $maintenant),
+                $maintenant
+            );
+            if ($refus) {
+                return response()->json(['success' => false, 'message' => $refus], 409);
             }
 
             // Android signale les positions fournies par une application de faux GPS.
@@ -3779,6 +3911,43 @@ class ApiAppController extends Controller
 
         // Sinon c'est une sortie
         return 'sortie';
+    }
+
+    /**
+     * Règles d'enchaînement des pointages d'une journée (QR et GPS) : une seule
+     * entrée, une seule sortie, et pas de sortie sans entrée. Un pointage hors
+     * site en attente de validation compte déjà ; un pointage refusé, non.
+     *
+     * @return string|null le motif du refus, ou null si le pointage est permis
+     */
+    private function refusEnchainementPointage(Employee $employee, string $type, Carbon $now): ?string
+    {
+        $types = Pointeuse::where('emp_id', $employee->id)
+            ->whereDate('auth_date', $now->toDateString())
+            ->pluck('type');
+
+        if (PointageHorsSite::tableExiste()) {
+            $types = $types->concat(
+                PointageHorsSite::where('employee_id', $employee->id)
+                    ->enAttente()
+                    ->whereDate('pointed_at', $now->toDateString())
+                    ->pluck('type')
+            );
+        }
+
+        if ($type === 'entree' && $types->contains('entree')) {
+            return '⛔ Entrée déjà pointée aujourd\'hui : vous ne pouvez pas la pointer une seconde fois.';
+        }
+
+        if ($type === 'sortie' && $types->contains('sortie')) {
+            return '⛔ Sortie déjà pointée aujourd\'hui : vous ne pouvez pas la pointer une seconde fois.';
+        }
+
+        if ($type === 'sortie' && !$types->contains('entree')) {
+            return '⛔ Sortie refusée : vous n\'avez pas pointé votre entrée aujourd\'hui. Pointez d\'abord votre entrée.';
+        }
+
+        return null;
     }
 
     //Controller des pdf important

@@ -9,7 +9,7 @@
             <div class="col-12">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h4 class="mb-1">⚙️ Paramètres Entreprise</h4>
+                        <h4 class="mb-1"> Paramètres Entreprise</h4>
                         <p class="text-muted mb-0">Configurez et gérez tous les paramètres de votre entreprise</p>
                         <small class="text-primary">
                             <i class="fas fa-calendar me-1"></i>
@@ -282,158 +282,158 @@
         </div>
 
         <!-- Paramètres RH 
-        <div class="row mb-4">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">👥 Paramètres Ressources Humaines</h5>
-                        <span class="badge bg-label-primary">Configuration RH</span>
-                    </div>
-                    <div class="card-body">
-                        <div class="row">
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">👥 Paramètres Ressources Humaines</h5>
+                            <span class="badge bg-label-primary">Configuration RH</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
 
-                            <div class="col-xl-3 col-md-6 mb-4">
-                                <div class="d-flex align-items-center justify-content-between p-3 border rounded">
-                                    <div class="d-flex align-items-center">
-                                        <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
-                                            <div class="avatar-initial bg-label-success rounded">
-                                                <i class="fas fa-calendar-alt fa-20px"></i>
+                                <div class="col-xl-3 col-md-6 mb-4">
+                                    <div class="d-flex align-items-center justify-content-between p-3 border rounded">
+                                        <div class="d-flex align-items-center">
+                                            <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
+                                                <div class="avatar-initial bg-label-success rounded">
+                                                    <i class="fas fa-calendar-alt fa-20px"></i>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h6 class="mb-0">Types de Congés</h6>
+                                                <small class="text-muted">{{ $stats['total_leave_types'] ?? 0 }} configurés</small>
                                             </div>
                                         </div>
-                                        <div>
-                                            <h6 class="mb-0">Types de Congés</h6>
-                                            <small class="text-muted">{{ $stats['total_leave_types'] ?? 0 }} configurés</small>
-                                        </div>
+                                        <a href="{{ route('company.settings.leave-types.index') }}" class="btn btn-sm btn-outline-primary">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
                                     </div>
-                                    <a href="{{ route('company.settings.leave-types.index') }}" class="btn btn-sm btn-outline-primary">
-                                        <i class="fas fa-eye"></i>
-                                    </a>
                                 </div>
-                            </div>
 
 
-                            <div class="col-xl-3 col-md-6 mb-4">
-                                <div class="d-flex align-items-center justify-content-between p-3 border rounded">
-                                    <div class="d-flex align-items-center">
-                                        <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
-                                            <div class="avatar-initial bg-label-info rounded">
-                                                <i class="fas fa-map-marker-alt fa-20px"></i>
+                                <div class="col-xl-3 col-md-6 mb-4">
+                                    <div class="d-flex align-items-center justify-content-between p-3 border rounded">
+                                        <div class="d-flex align-items-center">
+                                            <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
+                                                <div class="avatar-initial bg-label-info rounded">
+                                                    <i class="fas fa-map-marker-alt fa-20px"></i>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h6 class="mb-0">Emplacements</h6>
+                                                <small class="text-muted">{{ $stats['total_work_locations'] ?? 0 }} sites</small>
                                             </div>
                                         </div>
-                                        <div>
-                                            <h6 class="mb-0">Emplacements</h6>
-                                            <small class="text-muted">{{ $stats['total_work_locations'] ?? 0 }} sites</small>
-                                        </div>
+                                        <a href="{{ route('company.settings.work-locations.index') }}" class="btn btn-sm btn-outline-primary">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
                                     </div>
-                                    <a href="{{ route('company.settings.work-locations.index') }}" class="btn btn-sm btn-outline-primary">
-                                        <i class="fas fa-eye"></i>
-                                    </a>
                                 </div>
-                            </div>
 
 
-                            <div class="col-xl-3 col-md-6 mb-4">
-                                <div class="d-flex align-items-center justify-content-between p-3 border rounded">
-                                    <div class="d-flex align-items-center">
-                                        <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
-                                            <div class="avatar-initial bg-label-primary rounded">
-                                                <i class="fas fa-building fa-20px"></i>
+                                <div class="col-xl-3 col-md-6 mb-4">
+                                    <div class="d-flex align-items-center justify-content-between p-3 border rounded">
+                                        <div class="d-flex align-items-center">
+                                            <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
+                                                <div class="avatar-initial bg-label-primary rounded">
+                                                    <i class="fas fa-building fa-20px"></i>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h6 class="mb-0">Sites & Succursales</h6>
+                                                <small class="text-muted">{{ $stats['total_branches'] ?? 0 }} sites</small>
                                             </div>
                                         </div>
-                                        <div>
-                                            <h6 class="mb-0">Sites & Succursales</h6>
-                                            <small class="text-muted">{{ $stats['total_branches'] ?? 0 }} sites</small>
-                                        </div>
+                                        <a href="{{ route('company.settings.branches.index') }}" class="btn btn-sm btn-outline-primary">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
                                     </div>
-                                    <a href="{{ route('company.settings.branches.index') }}" class="btn btn-sm btn-outline-primary">
-                                        <i class="fas fa-eye"></i>
-                                    </a>
                                 </div>
-                            </div>
 
 
-                            <div class="col-xl-3 col-md-6 mb-4">
-                                <div class="d-flex align-items-center justify-content-between p-3 border rounded">
-                                    <div class="d-flex align-items-center">
-                                        <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
-                                            <div class="avatar-initial bg-label-info rounded">
-                                                <i class="fas fa-sitemap fa-20px"></i>
+                                <div class="col-xl-3 col-md-6 mb-4">
+                                    <div class="d-flex align-items-center justify-content-between p-3 border rounded">
+                                        <div class="d-flex align-items-center">
+                                            <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
+                                                <div class="avatar-initial bg-label-info rounded">
+                                                    <i class="fas fa-sitemap fa-20px"></i>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h6 class="mb-0">Services</h6>
+                                                <small class="text-muted">{{ $stats['total_departments'] ?? 0 }} services</small>
                                             </div>
                                         </div>
-                                        <div>
-                                            <h6 class="mb-0">Services</h6>
-                                            <small class="text-muted">{{ $stats['total_departments'] ?? 0 }} services</small>
-                                        </div>
+                                        <a href="{{ route('company.settings.departments.index') }}" class="btn btn-sm btn-outline-primary">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
                                     </div>
-                                    <a href="{{ route('company.settings.departments.index') }}" class="btn btn-sm btn-outline-primary">
-                                        <i class="fas fa-eye"></i>
-                                    </a>
                                 </div>
-                            </div>
 
 
-                            <div class="col-xl-3 col-md-6 mb-4">
-                                <div class="d-flex align-items-center justify-content-between p-3 border rounded">
-                                    <div class="d-flex align-items-center">
-                                        <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
-                                            <div class="avatar-initial bg-label-warning rounded">
-                                                <i class="fas fa-user-tie fa-20px"></i>
+                                <div class="col-xl-3 col-md-6 mb-4">
+                                    <div class="d-flex align-items-center justify-content-between p-3 border rounded">
+                                        <div class="d-flex align-items-center">
+                                            <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
+                                                <div class="avatar-initial bg-label-warning rounded">
+                                                    <i class="fas fa-user-tie fa-20px"></i>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h6 class="mb-0">Postes</h6>
+                                                <small class="text-muted">{{ $stats['total_designations'] ?? 0 }} postes</small>
                                             </div>
                                         </div>
-                                        <div>
-                                            <h6 class="mb-0">Postes</h6>
-                                            <small class="text-muted">{{ $stats['total_designations'] ?? 0 }} postes</small>
-                                        </div>
+                                        <a href="{{ route('company.settings.designations.index') }}" class="btn btn-sm btn-outline-primary">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
                                     </div>
-                                    <a href="{{ route('company.settings.designations.index') }}" class="btn btn-sm btn-outline-primary">
-                                        <i class="fas fa-eye"></i>
-                                    </a>
                                 </div>
-                            </div>
 
-                            <div class="col-xl-3 col-md-6 mb-4">
-                                <div class="d-flex align-items-center justify-content-between p-3 border rounded">
-                                    <div class="d-flex align-items-center">
-                                        <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
-                                            <div class="avatar-initial bg-label-secondary rounded">
-                                                <i class="fas fa-clock fa-20px"></i>
+                                <div class="col-xl-3 col-md-6 mb-4">
+                                    <div class="d-flex align-items-center justify-content-between p-3 border rounded">
+                                        <div class="d-flex align-items-center">
+                                            <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
+                                                <div class="avatar-initial bg-label-secondary rounded">
+                                                    <i class="fas fa-clock fa-20px"></i>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h6 class="mb-0">Système de Présence</h6>
+                                                <small class="text-muted">Configuration</small>
                                             </div>
                                         </div>
-                                        <div>
-                                            <h6 class="mb-0">Système de Présence</h6>
-                                            <small class="text-muted">Configuration</small>
-                                        </div>
+                                        <a href="{{ route('company.settings.attendance-system.index') }}" class="btn btn-sm btn-outline-primary">
+                                            <i class="fas fa-cog"></i>
+                                        </a>
                                     </div>
-                                    <a href="{{ route('company.settings.attendance-system.index') }}" class="btn btn-sm btn-outline-primary">
-                                        <i class="fas fa-cog"></i>
-                                    </a>
                                 </div>
-                            </div>
 
-                            <div class="col-xl-3 col-md-6 mb-4">
-                                <div class="d-flex align-items-center justify-content-between p-3 border rounded">
-                                    <div class="d-flex align-items-center">
-                                        <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
-                                            <div class="avatar-initial bg-label-secondary rounded">
-                                                <i class="fas fa-palette fa-20px"></i>
+                                <div class="col-xl-3 col-md-6 mb-4">
+                                    <div class="d-flex align-items-center justify-content-between p-3 border rounded">
+                                        <div class="d-flex align-items-center">
+                                            <div class="avatar avatar-sm me-3" style="width: 40px; height: 40px;">
+                                                <div class="avatar-initial bg-label-secondary rounded">
+                                                    <i class="fas fa-palette fa-20px"></i>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h6 class="mb-0">Thème & Couleurs</h6>
+                                                <small class="text-muted">Personnalisé</small>
                                             </div>
                                         </div>
-                                        <div>
-                                            <h6 class="mb-0">Thème & Couleurs</h6>
-                                            <small class="text-muted">Personnalisé</small>
-                                        </div>
+                                        <button class="btn btn-sm btn-outline-primary" onclick="configureColors()">
+                                            <i class="fas fa-palette"></i>
+                                        </button>
                                     </div>
-                                    <button class="btn btn-sm btn-outline-primary" onclick="configureColors()">
-                                        <i class="fas fa-palette"></i>
-                                    </button>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
-        -->
+            -->
 
         <!-- Actions Rapides -->
         <div class="row">

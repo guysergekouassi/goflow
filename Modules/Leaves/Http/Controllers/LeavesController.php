@@ -11,9 +11,9 @@ use Modules\Leaves\Models\LeaveType;
 use App\Models\PaieExercice;
 use App\Models\PaiePeriode;
 use App\Models\Allowance;
+use App\Services\AbsenceService;
 use App\Services\DepartmentStaffingGuard;
 use Modules\PaieSalaries\Models\PaySlip;
-use Modules\Time\Models\TimeSheet;
 use Illuminate\Support\Facades\Auth;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Validator;
@@ -404,36 +404,9 @@ class LeavesController extends Controller
 
             // Un congé approuvé doit apparaître "justifié" dans les rapports de présence
             // (TimeController::reports() ne lit que time_sheets, jamais la table leaves).
+            // (même inscription quand la demande est approuvée depuis le mobile).
             if (!$wasApproved) {
-                $startDate = Carbon::parse($leave->start_date);
-                $endDate = Carbon::parse($leave->end_date);
-
-                // Jours couverts, bornes incluses. diff()->d ne renvoyait que la
-                // composante « jours » de l'écart : une absence d'un mois pile
-                // donnait 0 jour, donc 0 h et aucune retenue.
-                $days = $startDate->diffInDays($endDate) + 1;
-
-                // Motif affiché dans la gestion de présence : le type de congé
-                // demandé depuis le mobile (Maladie, Décès, Permission…), avec
-                // repli sur le nombre de jours déjà calculé à la demande.
-                $motif = $leave->leaveType->title ?? 'Absence justifiée';
-
-                TimeSheet::create([
-                    'employee_id' => $leave->employee_id,
-                    'periode_id' => $leave->periode_id,
-                    'date' => $leave->start_date,
-                    'arrival_date' => $leave->end_date,
-                    'hours' => round($days * 8),
-                    'motif_justify' => 'Oui',
-                    'type_permis' => $motif,
-                    'remark' => $leave->leave_reason,
-                    'retenue' => $days,
-                    'deduc_abs' => 0,
-                    'statut' => 'approved',
-                    'document' => null,
-                    'monthpaie' => $startDate->format('Y-m'),
-                    'company_id' => $leave->company_id,
-                ]);
+                app(AbsenceService::class)->recordApproved($leave);
             }
         }
 
