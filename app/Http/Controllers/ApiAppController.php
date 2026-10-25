@@ -97,6 +97,21 @@ class ApiAppController extends Controller
     private const GPS_DEFAULT_RADIUS_METERS = 100;
 
     /**
+     * Pointage GPS : un site n'est confirmé que par une position au moins aussi
+     * précise que son rayon (un rayon de 25 m ne se vérifie pas à ± 80 m), sans
+     * exiger mieux que ce plancher (mètres).
+     */
+    private const GPS_ACCURACY_FLOOR_METERS = 30;
+
+    /**
+     * Pointage GPS : la position mesurée peut s'écarter de la position réelle de
+     * son imprécision. Un employé au portail mesuré juste hors du rayon est
+     * accepté avec cette marge au plus (mètres), pour ne pas l'envoyer à tort
+     * en validation hors site.
+     */
+    private const GPS_TOLERANCE_MAX_METERS = 15;
+
+    /**
      * Handle an incoming authentication request.
      *
      * @param  \App\Http\Requests\Auth\LoginRequest  $request
@@ -3515,12 +3530,13 @@ class ApiAppController extends Controller
     }
 
     /**
-     * Pointage à distance par géolocalisation (employé en service chez un client).
+     * Pointage par géolocalisation, sans QR code : au bureau (dès le portail,
+     * avec un rayon de 25 m) ou chez un client.
      *
      * L'application envoie la position GPS de l'employé. Le serveur retient
-     * l'emplacement le plus proche parmi ceux où le pointage à distance est
-     * autorisé (Configuration > Emplacements), et refuse le pointage si
-     * l'employé se trouve hors de son rayon.
+     * l'emplacement le plus proche parmi ceux où le pointage GPS est autorisé
+     * (Configuration > Emplacements) : dans son rayon, le pointage compte
+     * aussitôt ; hors de tout rayon, il part en validation chez le supérieur.
      */
     public function gpsPointage(Request $request)
     {
@@ -3610,19 +3626,41 @@ class ApiAppController extends Controller
             $latitude = (float) $request->input('latitude');
             $longitude = (float) $request->input('longitude');
 
-            $measured = $sites->map(fn ($site) => [
-                'site' => $site,
-                'distance' => (int) round($this->distanceEnMetres($latitude, $longitude, (float) $site->latitude, (float) $site->longitude)),
-                'rayon' => $site->max_distance_meters ?: self::GPS_DEFAULT_RADIUS_METERS,
-            ])->sortBy('distance')->values();
+            $measured = $sites->map(function ($site) use ($latitude, $longitude) {
+                $rayon = $site->max_distance_meters ?: self::GPS_DEFAULT_RADIUS_METERS;
 
-            // Le site le plus proche dont l'employé est dans le rayon
-            $match = $measured->first(fn ($m) => $m['distance'] <= $m['rayon']);
+                return [
+                    'site' => $site,
+                    'distance' => (int) round($this->distanceEnMetres($latitude, $longitude, (float) $site->latitude, (float) $site->longitude)),
+                    'rayon' => $rayon,
+                    'precision' => max($rayon, self::GPS_ACCURACY_FLOOR_METERS),
+                ];
+            })->sortBy('distance')->values();
 
-            // Hors de tout site connu (ou aucun site enregistré) : ce n'est pas une
-            // anomalie en soi (visite client, autre site…). Le pointage part en
-            // validation chez le supérieur hiérarchique au lieu d'être refusé.
+            // Le site le plus proche dont l'employé est dans le rayon, mesuré assez précisément,
+            // avec une marge égale à l'imprécision du GPS (plafonnée)
+            $marge = min($accuracy, self::GPS_TOLERANCE_MAX_METERS);
+            $match = $measured->first(fn ($m) => $m['distance'] <= $m['rayon'] + $marge && $accuracy <= $m['precision']);
+
             if (!$match) {
+                // Position trop floue pour trancher alors que l'employé est peut-être
+                // sur un site (au portail du bureau…) : il réessaie, au lieu d'envoyer
+                // à son supérieur un pointage qui aurait dû compter tout de suite.
+                $incertain = $measured->first(fn ($m) => $accuracy > $m['precision'] && $m['distance'] - $accuracy <= $m['rayon']);
+
+                if ($incertain) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => '📡 Position pas assez précise pour confirmer votre présence à « ' . $incertain['site']->name . ' » (± ' . $accuracy . ' m, il faut ± ' . $incertain['precision'] . ' m au plus). Restez quelques secondes à découvert, puis réessayez.',
+                        'gps_accuracy' => $accuracy,
+                        'precision_requise' => $incertain['precision'],
+                        'site' => $incertain['site']->name,
+                    ], 422);
+                }
+
+                // Hors de tout site connu (ou aucun site enregistré) : ce n'est pas une
+                // anomalie en soi (visite client, autre site…). Le pointage part en
+                // validation chez le supérieur hiérarchique au lieu d'être refusé.
                 return $this->pointageHorsSite($request, $employee, $latitude, $longitude, $accuracy, $measured->first());
             }
 
@@ -3630,8 +3668,14 @@ class ApiAppController extends Controller
             $now = Carbon::now();
             $pointageType = $request->input('type') ?: $this->determinerTypePointage($employee->id, $now);
 
-            // Retard / départ anticipé selon les horaires de l'emplacement
-            $evaluation  = app(BranchScheduleResolver::class)->evaluateScan($site, $pointageType, $now);
+            // Retard / départ anticipé selon les horaires de l'emplacement. Au bureau
+            // d'une succursale, les mêmes qu'au scan de son QR code : ceux du service
+            // de l'employé, à défaut ceux du site.
+            $schedules = app(BranchScheduleResolver::class);
+            $horaire = $site->type === 'office' && $site->branch_id
+                ? ($schedules->resolveForEmployee((int) $employee->company_id, (int) $site->branch_id, $employee->department_id) ?? $site)
+                : $site;
+            $evaluation  = $schedules->evaluateScan($horaire, $pointageType, $now);
             $scanStatus  = $evaluation['status'];
             $dureeRetard = $evaluation['minutes'];
 

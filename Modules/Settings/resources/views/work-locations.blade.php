@@ -347,7 +347,7 @@
                                 <input type="hidden" name="allow_remote_clock" value="0" id="allowRemoteClockHidden">
                                 <input class="form-check-input" type="checkbox" name="allow_remote_clock" id="allowRemoteClock" value="1">
                                 <label class="form-check-label" for="allowRemoteClock">
-                                    Autoriser le pointage à distance
+                                    Autoriser le pointage GPS (sans QR code)
                                 </label>
                             </div>
                         </div>
@@ -384,7 +384,7 @@
                         <div class="mb-3">
                             <label class="form-label">Distance Max (mètres)</label>
                             <input type="number" class="form-control" name="max_distance_meters" value="100" min="10" max="1000">
-                            <small class="text-muted">Distance maximale autorisée pour le pointage géolocalisé</small>
+                            <small class="text-muted">Rayon autour du site où le pointage GPS compte aussitôt. Bureau : 25 m pour pointer dès le portail ; site client : 100 m ou plus.</small>
                         </div>
                     </div>
                 </div>
@@ -532,7 +532,7 @@
                                 <input type="hidden" name="allow_remote_clock" value="0" id="editAllowRemoteClockHidden">
                                 <input class="form-check-input" type="checkbox" name="allow_remote_clock" id="editAllowRemoteClock" value="1">
                                 <label class="form-check-label" for="editAllowRemoteClock">
-                                    Autoriser le pointage à distance
+                                    Autoriser le pointage GPS (sans QR code)
                                 </label>
                             </div>
                         </div>
@@ -580,7 +580,7 @@
                         <div class="mb-3">
                             <label class="form-label">Distance Max (mètres)</label>
                             <input type="number" class="form-control" name="max_distance_meters" id="edit_max_distance_meters" value="100" min="10" max="1000">
-                            <small class="text-muted">Distance maximale autorisée pour le pointage géolocalisé</small>
+                            <small class="text-muted">Rayon autour du site où le pointage GPS compte aussitôt. Bureau : 25 m pour pointer dès le portail ; site client : 100 m ou plus.</small>
                         </div>
                     </div>
                 </div>
