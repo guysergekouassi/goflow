@@ -17,7 +17,7 @@ return new class extends Migration
             $table->string('param_fiscal')->nullable();
             $table->string('param_social')->nullable();
             $table->enum('type', ['default', 'created'])->default('default');
-            table->boolean('is_active')->default(true);
+            $table->boolean('is_active')->default(true);
             $table->unsignedBigInteger('company_id');
             $table->foreign('company_id')->references('id')->on('companies')->onDelete('cascade');
             $table->timestamps();

@@ -16,11 +16,6 @@ class LoginController extends Controller
      */
     public function showLoginForm()
     {
-        // Si déjà connecté, rediriger vers le dashboard approprié
-        if (Auth::check()) {
-            return self::redirectToDashboard();
-        }
-
         return view('auth.login');
     }
 
@@ -82,28 +77,32 @@ class LoginController extends Controller
     }
 
     /**
-     * Rediriger vers le dashboard approprié selon le type d'utilisateur
+    /**
+     * Obtenir l'URL du tableau de bord approprié selon le type d'utilisateur
      */
-    public static function redirectToDashboard()
+    public static function getDashboardUrl(?User $user = null): string
     {
-        $user = Auth::user();
-    
+        $user = $user ?? Auth::user();
+
         if (!$user) {
-            return redirect()->route('login');
+            return route('login');
         }
 
-        switch ($user->type) {
-            case 'super_admin':
-                return redirect()->route('super-admin.dashboard');
-            case 'company':
-                return redirect('/company/dashboard');
-            case 'hr':
-            case 'paie':
-                return redirect('/hr/dashboard');
-            case 'employee':
-            default:
-                return redirect('/employee/dashboard');
-        }
+        return match ($user->type) {
+            'super_admin' => route('super-admin.dashboard'),
+            'company' => url('/company/dashboard'),
+            'hr', 'paie' => url('/hr/dashboard'),
+            'employee' => url('/employee/dashboard'),
+            default => url('/company/dashboard'),
+        };
+    }
+
+    /**
+     * Rediriger vers le dashboard approprié selon le type d'utilisateur
+     */
+    public static function redirectToDashboard(?User $user = null)
+    {
+        return redirect(self::getDashboardUrl($user));
     }
 
     /** 

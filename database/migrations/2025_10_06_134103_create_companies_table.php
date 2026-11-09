@@ -11,9 +11,12 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('companies', function (Blueprint $table) {
-            $table->id();
-            $table->string('name');
+        if (!Schema::hasTable('companies')) {
+            Schema::create('companies', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('user_id')->nullable()->index();
+                $table->unsignedBigInteger('plan_id')->nullable()->index();
+                $table->string('name');
             $table->string('email')->unique();
             $table->string('phone')->nullable();
             $table->text('address')->nullable();
@@ -61,6 +64,7 @@ return new class extends Migration
             $table->index('industry');
             $table->index('size');
         });
+        } // end if (!Schema::hasTable('companies'))
     }
 
     /**

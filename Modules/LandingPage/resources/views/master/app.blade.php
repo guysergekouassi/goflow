@@ -348,8 +348,12 @@
                         <li><a href="#fonctionnalites" class="block py-2 text-gray-700 hover:text-primary font-medium">Fonctionnalités</a></li>
                         <li><a href="#avantages" class="block py-2 text-gray-700 hover:text-primary font-medium">Avantages</a></li>
                         <li><a href="#tarifs" class="block py-2 text-gray-700 hover:text-primary font-medium">Tarifs</a></li>
-                        <li><a href="#contact" class="block py-2 text-gray-700 hover:text-primary font-medium">Contact</a></li>
-                        <li class="pt-4 border-t"><a href="#" class="block py-2 text-gray-700 hover:text-primary font-medium">Se connecter</a></li>
+                        @auth
+                            <li class="pt-4 border-t"><a href="{{ \App\Http\Controllers\Auth\LoginController::getDashboardUrl() }}" class="block py-2 text-primary hover:text-primary/80 font-semibold"><i class="ri-dashboard-line mr-1"></i>Mon Espace</a></li>
+                            <li><a href="{{ route('login') }}" class="block py-2 text-gray-700 hover:text-primary font-medium">Se connecter</a></li>
+                        @else
+                            <li class="pt-4 border-t"><a href="{{ route('login') }}" class="block py-2 text-gray-700 hover:text-primary font-medium">Se connecter</a></li>
+                        @endauth
                         <li><a href="#contact" class="block py-2 bg-primary text-white px-6 py-2 rounded-button text-center">Demander une démo</a></li>
                     </ul>
                 </nav>

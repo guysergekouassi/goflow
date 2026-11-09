@@ -760,9 +760,18 @@ class SuperAdminController extends Controller
             abort(403, 'Accès non autorisé');
         }
 
+        // Normaliser l'URL du site web si saisie sans protocole
+        if ($request->filled('website') && !preg_match('~^(?:f|ht)tps?://~i', (string) $request->website)) {
+            $request->merge(['website' => 'https://' . trim($request->website)]);
+        }
+
+        $userEmail = $request->filled('email_connexion') ? trim($request->input('email_connexion')) : trim($request->input('email'));
+        $request->merge(['user_email' => $userEmail]);
+
         $validated = $request->validate([
             'name' => 'required|string',
-            'email' => 'required|email|unique:users,email',
+            'email' => 'required|email',
+            'user_email' => 'required|email|unique:users,email',
             'username' => 'required|string|unique:users,username',
             'password' => 'required|string|min:8|confirmed',
             'plan' => 'required|integer|min:1',
@@ -791,26 +800,30 @@ class SuperAdminController extends Controller
             'billing_period' => 'nullable|in:monthly,yearly',
             'subscription_start_date' => 'nullable|date',
             'subscription_end_date' => 'nullable|date|after_or_equal:subscription_start_date',
+        ], [
+            'user_email.unique' => 'Cet email de connexion est déjà utilisé par un autre compte.',
+            'username.unique' => 'Ce nom d\'utilisateur est déjà utilisé.',
+            'password.confirmed' => 'La confirmation du mot de passe ne correspond pas.',
+            'password.min' => 'Le mot de passe doit contenir au moins 8 caractères.',
+            'plan.required' => 'Veuillez sélectionner un plan d\'abonnement.',
+            'storage_limit.required' => 'La limite de stockage est obligatoire.',
         ]);
         
         $logoName = '';
         $logo = $request->file('logo');
         
         if ($logo) {
-            // Vérifier que le fichier est valide
             if ($logo->isValid()) {
-                // Générer un nom de fichier unique
                 $logoName = time() . '.' . $logo->getClientOriginalExtension();
-                
-                // Déplacer le fichier vers le bon répertoire
                 $logo->move(public_path('storage/logos'), $logoName);
             } else {
-                // Gérer l'erreur si le fichier n'est pas valide
-                return response()->json(['error' => 'Le fichier est invalide.'], 400);
+                return back()->withInput()->with('error', 'Le fichier de logo est invalide.');
             }
         }
         
         try {
+            DB::beginTransaction();
+
             // Compute subscription activation and dates
             $activationTiming = $request->input('activation_timing', 'now');
             $billingPeriod = $request->input('billing_period', 'monthly');
@@ -825,12 +838,12 @@ class SuperAdminController extends Controller
 
             $isActive = $activationTiming === 'now';
             $subscriptionStatus = $isActive ? 'active' : 'pending';
-            $plan = Plan::find($validated['plan']);
+            $plan = Plan::findOrFail($validated['plan']);
 
-            // Créer l'entreprise utilisateur
-            $company = User::create([
+            // 1. Créer l'utilisateur associé au compte entreprise
+            $companyUser = User::create([
                 'name' => $validated['name'],
-                'email' => $validated['email'],
+                'email' => $validated['user_email'],
                 'username' => $validated['username'],
                 'password' => $validated['password'],
                 'type' => 'company',
@@ -842,27 +855,32 @@ class SuperAdminController extends Controller
                 'active_status' => 1,
                 'lang' => $validated['locale'] ?? 'fr',
                 'currency' => $validated['currency'] ?? 'XOF',
-                'plan_cpte_trait' => $plan->nbre_trait,
+                'plan_cpte_trait' => $plan->nbre_trait ?? 1,
             ]);
 
-            // Créer l'entité Company associée
-            Company::create([
-                'user_id' => $company->id,
+            // Préparer l'adresse et le pays avec fallback
+            $addressParts = array_filter([$validated['location'] ?? null, $validated['address'] ?? null]);
+            $fullAddress = !empty($addressParts) ? implode(', ', $addressParts) : null;
+            $country = !empty($validated['country']) ? trim($validated['country']) : 'Côte d\'Ivoire';
+
+            // 2. Créer l'entité Company associée
+            $company = Company::create([
+                'user_id' => $companyUser->id,
                 'plan_id' => (int) $validated['plan'],
                 'name' => $validated['name'],
                 'email' => $validated['email'],
-                'phone' => $validated['phone'],
-                'address' => $validated['location'].', '.$validated['address'],
-                'city' => $validated['city'],
-                'postal_code' => $validated['postal_code'],
-                'country' => $validated['country'],
-                'website' => $validated['website'],
+                'phone' => $validated['phone'] ?? null,
+                'address' => $fullAddress,
+                'city' => $validated['city'] ?? null,
+                'postal_code' => $validated['postal_code'] ?? null,
+                'country' => $country,
+                'website' => $validated['website'] ?? null,
                 'logo' => $logoName,
-                'industry' => $validated['industry'],
-                'size' => $validated['size'],
-                'description' => $validated['description'],
-                'tax_id' => $validated['tax_id'],
-                'registration_number' => $validated['registration_number'],
+                'industry' => $validated['industry'] ?? null,
+                'size' => !empty($validated['size']) ? $validated['size'] : 'small',
+                'description' => $validated['description'] ?? null,
+                'tax_id' => $validated['tax_id'] ?? null,
+                'registration_number' => $validated['registration_number'] ?? null,
                 'working_hours_per_week' => $validated['working_hours_per_week'] ?? 40,
                 'working_days_per_week' => $validated['working_days_per_week'] ?? 5,
                 'is_active' => $isActive,
@@ -875,14 +893,24 @@ class SuperAdminController extends Controller
                 'settings' => [],
                 'created_by' => Auth::id(),
             ]);
-            \Log::info('Entreprise créée avec succès');
-            return redirect()->route('super-admin.enterprises.show', $company)
+
+            // Lier l'ID de l'entreprise à l'utilisateur
+            $companyUser->update(['company_id' => $company->id]);
+
+            DB::commit();
+
+            Log::info("Entreprise {$company->name} créée avec succès (ID: {$company->id})");
+            return redirect()->route('super-admin.enterprises.show', $companyUser)
                            ->with('success', 'Entreprise créée avec succès');
 
         } catch (\Exception $e) {
-            \Log::error('Erreur lors de la création de l\'entreprise: ' . $e->getMessage());
+            DB::rollBack();
+            Log::error('Erreur lors de la création de l\'entreprise: ' . $e->getMessage(), [
+                'exception' => $e
+            ]);
             return back()->withInput()
-                        ->withErrors(['error' => 'Erreur lors de la création de l\'entreprise: ' . $e->getMessage()]);
+                        ->with('error', 'Erreur lors de la création de l\'entreprise : ' . $e->getMessage())
+                        ->withErrors(['error' => 'Erreur lors de la création de l\'entreprise : ' . $e->getMessage()]);
         }
     }
 

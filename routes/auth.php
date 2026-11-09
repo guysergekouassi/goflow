@@ -19,16 +19,16 @@ Route::get('/', [\Modules\LandingPage\Http\Controllers\LandingPageController::cl
 Route::get('/simulateur', [\Modules\LandingPage\Http\Controllers\LandingPageController::class, 'simulateur'])->name('simulateur');
 Route::get('/contact', [\Modules\LandingPage\Http\Controllers\LandingPageController::class, 'contact'])->name('contact');
 
+// Connexion (accessible directement afin d'éviter tout rejet si une session résiduelle existe)
+Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
+Route::post('/login', [LoginController::class, 'login'])->name('login.post');
+
 // Routes d'authentification (uniquement pour les visiteurs non-connectés)
 Route::middleware('guest')->group(function () {
     // Routes de paiement
     Route::post('/payment/initiate', [\Modules\LandingPage\Http\Controllers\PaymentController::class, 'initiatePayment'])->name('payment.initiate');
     Route::get('/payment/callback', [\Modules\LandingPage\Http\Controllers\PaymentController::class, 'handleCallback'])->name('payment.callback');
     Route::post('/payment/webhook/wave', [\Modules\LandingPage\Http\Controllers\PaymentController::class, 'webhook'])->name('payment.webhook.wave');
-
-    // Connexion
-    Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
-    Route::post('/login', [LoginController::class, 'login'])->name('login.post');
 
     // Mot de passe oublié
     Route::get('/forgot-password', [LoginController::class, 'showForgotPasswordForm'])->name('password.request');

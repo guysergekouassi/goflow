@@ -19,6 +19,19 @@
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>
         @endif
+
+        @if($errors->any())
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="ti ti-alert-triangle me-2"></i>
+            <strong>Veuillez corriger les erreurs suivantes :</strong>
+            <ul class="mb-0 mt-1">
+                @foreach($errors->all() as $error)
+                    <li>{{ $error }}</li>
+                @endforeach
+            </ul>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        @endif
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <div>
@@ -206,13 +219,17 @@
                                         </div>
                                         <div class="col-md-6 mb-3">
                                             <label for="username" class="form-label">Nom d'utilisateur <span class="text-danger">*</span></label>
-                                            <input type="text"
-                                                class="form-control @error('username') is-invalid @enderror"
-                                                id="username"
-                                                name="username"
-                                                value="{{ old('username') }}"
-                                                readonly
-                                                required>
+                                            <div class="input-group">
+                                                <input type="text"
+                                                    class="form-control @error('username') is-invalid @enderror"
+                                                    id="username"
+                                                    name="username"
+                                                    value="{{ old('username') }}"
+                                                    required>
+                                                <button type="button" class="btn btn-outline-secondary" onclick="generateProposal()" title="Générer un nom d'utilisateur">
+                                                    <i class="ti ti-refresh"></i>
+                                                </button>
+                                            </div>
                                             @error('username')
                                                 <div class="invalid-feedback">{{ $message }}</div>
                                             @enderror
@@ -739,15 +756,17 @@ document.addEventListener('DOMContentLoaded', function() {
 function generateProposal() {
     var nameField = document.getElementById('name');
     var usernameField = document.getElementById('username');
-    var username = nameField.value.replace(/\s+/g, '').toUpperCase(); // Supprime tous les espaces et convertit en majuscules
+    var rawName = (nameField.value || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
-    if (username.length >= 4) {
-        var firstFourLetters = username.substring(0, 4); // Prend les quatre premières lettres
-        var randomDigits = Math.floor(10 + Math.random() * 90); // Génère deux chiffres aléatoires
-        var proposal = firstFourLetters + randomDigits; // Combine les lettres et les chiffres
-
-        usernameField.value = proposal; // Met à jour la valeur du champ avec la proposition générée
+    if (rawName.length === 0) {
+        rawName = 'ENTR';
     }
+    var prefix = rawName.substring(0, 4);
+    while (prefix.length < 4) {
+        prefix += 'X';
+    }
+    var randomDigits = Math.floor(10 + Math.random() * 90);
+    usernameField.value = prefix + randomDigits;
 }
 
 function repeatEmail() {
@@ -883,19 +902,23 @@ function togglePasswordVisibility(inputId) {
 document.addEventListener('DOMContentLoaded', function() {
     // Validation du formulaire
     const form = document.querySelector('.needs-validation');
+    const submitBtn = document.getElementById('submitBtn');
 
-    form.addEventListener('submit', function(event) {
-        if (!form.checkValidity()) {
-            event.preventDefault();
-            event.stopPropagation();
-        }
+    if (form && submitBtn) {
+        form.addEventListener('submit', function(event) {
+            if (!form.checkValidity()) {
+                event.preventDefault();
+                event.stopPropagation();
+                form.classList.add('was-validated');
+                return;
+            }
 
-        // Désactiver le bouton
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<i class="ti ti-loader me-2"></i>Création...';
-
-        form.classList.add('was-validated');
-    });
+            // Désactiver le bouton uniquement si le formulaire est valide
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="ti ti-loader me-2"></i>Création...';
+            form.classList.add('was-validated');
+        });
+    }
 
     // Gestion globale des erreurs de réseau
     window.addEventListener('offline', function() {

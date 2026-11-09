@@ -3,6 +3,7 @@
 use App\Services\AbsenceService;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -18,6 +19,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (!Schema::hasTable('leaves') || !Schema::hasColumn('leaves', 'created_by')) {
+            return;
+        }
+
         $parEntreprise = DB::table('leaves')
             ->join('employees', 'employees.id', '=', 'leaves.employee_id')
             ->whereColumn('leaves.created_by', 'employees.user_id')

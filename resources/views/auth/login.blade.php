@@ -4,6 +4,21 @@
 @section('subtitle', 'Connectez-vous à votre compte')
 
 @section('content')
+@auth
+<div class="alert alert-info alert-dismissible fade show d-flex align-items-center mb-4" role="alert">
+    <i class="ti-info-alt fs-5 me-2"></i>
+    <div class="small">
+        Vous êtes connecté en tant que <strong>{{ auth()->user()->name ?? auth()->user()->email }}</strong>.
+        <div class="mt-1">
+            <a href="{{ \App\Http\Controllers\Auth\LoginController::getDashboardUrl() }}" class="alert-link text-decoration-underline fw-semibold">
+                Accéder à votre tableau de bord &rarr;
+            </a>
+        </div>
+    </div>
+    <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert"></button>
+</div>
+@endauth
+
 <form method="POST" action="{{ route('login') }}" class="needs-validation" novalidate>
     @csrf
 

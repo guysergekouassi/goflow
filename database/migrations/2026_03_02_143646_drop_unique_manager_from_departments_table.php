@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (\Illuminate\Support\Facades\DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
         Schema::table('departments', function (Blueprint $table) {
             $table->dropUnique('department_manager_id_company_id_index');
         });

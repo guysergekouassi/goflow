@@ -22,16 +22,20 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('plans', function (Blueprint $table) {
-            $table->decimal('price_per_employee', 10, 2)->default(0)->after('price_yearly');
-            $table->unsignedInteger('included_employees')->default(0)->after('price_per_employee');
-        });
+        if (Schema::hasTable('plans')) {
+            Schema::table('plans', function (Blueprint $table) {
+                $table->decimal('price_per_employee', 10, 2)->default(0)->after('price_yearly');
+                $table->unsignedInteger('included_employees')->default(0)->after('price_per_employee');
+            });
+        }
 
-        Schema::table('orders', function (Blueprint $table) {
-            $table->unsignedInteger('employees_count')->nullable()->after('plan_id');
-            $table->decimal('base_amount', 12, 2)->nullable()->after('employees_count');
-            $table->decimal('employees_amount', 12, 2)->nullable()->after('base_amount');
-        });
+        if (Schema::hasTable('orders')) {
+            Schema::table('orders', function (Blueprint $table) {
+                $table->unsignedInteger('employees_count')->nullable()->after('plan_id');
+                $table->decimal('base_amount', 12, 2)->nullable()->after('employees_count');
+                $table->decimal('employees_amount', 12, 2)->nullable()->after('base_amount');
+            });
+        }
     }
 
     public function down(): void

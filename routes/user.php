@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Company\CompanyController;
 use App\Http\Controllers\Company\PackController;
+use App\Http\Controllers\Company\MonthlyReportController;
 use App\Http\Controllers\HR\HRController;
 use App\Http\Controllers\Employee\EmployeeController;
 
@@ -35,6 +36,19 @@ Route::middleware(['auth', 'maintenance'])->prefix('company')->name('company.')-
     Route::post('/packs/orders/{order}/cancel', [PackController::class, 'cancelOrder'])->name('packs.orders.cancel');
     Route::get('/packs/orders/{order}/invoice', [PackController::class, 'downloadInvoice'])->name('packs.orders.invoice');
     Route::get('/packs/orders/{order}', [PackController::class, 'showOrderDetails'])->name('packs.orders.show');
+
+    // Routes pour les rapports mensuels des pointages
+    Route::prefix('reports/monthly')->name('reports.monthly.')->group(function () {
+        Route::get('/', [MonthlyReportController::class, 'index'])->name('index');
+        Route::get('/settings', [MonthlyReportController::class, 'settings'])->name('settings');
+        Route::post('/settings', [MonthlyReportController::class, 'updateSettings'])->name('settings.update');
+        Route::post('/generate', [MonthlyReportController::class, 'generateManual'])->name('generate');
+        Route::post('/test', [MonthlyReportController::class, 'generateManual'])->name('test');
+        Route::get('/download/{report}', [MonthlyReportController::class, 'download'])->name('download');
+        Route::get('/download/{report}/pdf', [MonthlyReportController::class, 'downloadPdf'])->name('download.pdf');
+        Route::get('/download/{report}/excel', [MonthlyReportController::class, 'downloadExcel'])->name('download.excel');
+        Route::delete('/{report}', [MonthlyReportController::class, 'destroy'])->name('destroy');
+    });
 });
 
 // Routes pour les RH/Paie

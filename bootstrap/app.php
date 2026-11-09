@@ -33,6 +33,11 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         // Intercepter toutes les exceptions pour afficher la page premium, même en débug
         $exceptions->render(function (Throwable $e, Request $request) {
+            // Ne pas intercepter les ValidationException : Laravel les gère nativement (422 JSON)
+            if ($e instanceof \Illuminate\Validation\ValidationException) {
+                return null;
+            }
+
             // Si c'est une requête API/JSON, on garde le format JSON
             if ($request->expectsJson()) {
                 $statusCode = 500;

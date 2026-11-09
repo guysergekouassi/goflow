@@ -22,8 +22,10 @@ class AppServiceProvider extends ServiceProvider
     {
         Paginator::useBootstrapFive();
 
-        // if (config('app.env') === 'production' || str_contains(config('app.url'), 'https')) {
-        //     \Illuminate\Support\Facades\URL::forceScheme('https');
-        // }
+        // Rediriger les utilisateurs déjà authentifiés vers leur tableau de bord respectif
+        // au lieu de '/' (landing page) afin d'éviter tout rejet ou boucle de redirection
+        \Illuminate\Auth\Middleware\RedirectIfAuthenticated::redirectUsing(function ($request) {
+            return \App\Http\Controllers\Auth\LoginController::getDashboardUrl();
+        });
     }
 }

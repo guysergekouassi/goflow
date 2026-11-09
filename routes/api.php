@@ -147,7 +147,18 @@ Route::middleware(['jwt.auth'])->group(function () {
     Route::post('/profile/update-avatar', [ApiAppController::class, 'updateTheAvatar'])->name('update.account');
     
    
+
+    // Routes Pointage GPS & Sites Clients / Déplacements hors site
+    Route::get('/client-sites', [ApiAppController::class, 'getClientSites']);
+    Route::post('/client-sites', [ApiAppController::class, 'saveClientSite']);
+    Route::delete('/client-sites/{id}', [ApiAppController::class, 'deleteClientSite']);
+    Route::post('/pointage/gps-declaration', [ApiAppController::class, 'submitGpsDeclaration']);
+    Route::get('/pointage/gps-declarations', [ApiAppController::class, 'getGpsDeclarations']);
+    Route::post('/pointage/gps-declarations/{id}/validate', [ApiAppController::class, 'validateGpsDeclaration']);
+    Route::post('/pointage/gps-declarations/{id}/reject', [ApiAppController::class, 'rejectGpsDeclaration']);
+    Route::post('/pointage/gps-declarations/{id}/modify', [ApiAppController::class, 'modifyGpsDeclaration']);
 });
+
 Route::middleware([VerifyHubToken::class])->group(function () {
     Route::get('/companies', [DashboardApiController::class, 'getCompanies']);
     Route::get('/dashboard/kpis', [DashboardApiController::class, 'getKpis']);

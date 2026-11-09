@@ -28,6 +28,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Carbon\Carbon;
 use App\Models\User;
+use App\Models\GpsDeclaration;
 use App\Models\Notification;
 
 use App\Models\Company;
@@ -4574,4 +4575,472 @@ th{background:#f0c300;font-weight:bold;}
             'can_decide' => $p->status === PointageHorsSite::EN_ATTENTE && $service->canDecide($user, $p),
         ];
     }
+
+    // =========================================================================
+    // POINTAGE GPS & GESTION DES SITES CLIENTS / HORS SITE
+    // =========================================================================
+
+    /**
+     * Récupère la liste des sites clients / emplacements autorisés
+     */
+    public function getClientSites(Request $request)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            $employee = Employee::where('user_id', $user->id)->first();
+            $companyId = $employee ? $employee->company_id : ($user->company_id ?: $user->id);
+
+            $locations = WorkLocation::where('company_id', $companyId)
+                ->where('is_active', 1)
+                ->get();
+
+            $formatted = $locations->map(function ($loc) {
+                return [
+                    'id' => (string) $loc->id,
+                    'name' => $loc->name,
+                    'type' => $loc->type ?: 'site_client',
+                    'address' => $loc->address ?: '',
+                    'latitude' => (float) $loc->latitude,
+                    'longitude' => (float) $loc->longitude,
+                    'radius_meters' => (int) ($loc->max_distance_meters ?: 100),
+                    'allow_remote_checkin' => (bool) $loc->allow_remote_clock,
+                    'arrival_time' => $loc->check_in_start ? substr((string)$loc->check_in_start, 0, 5) : '08:00',
+                    'departure_time' => $loc->check_out_end ? substr((string)$loc->check_out_end, 0, 5) : '17:00',
+                    'branch_id' => $loc->branch_id ? (string) $loc->branch_id : null,
+                    'department_id' => $loc->department_id ? (string) $loc->department_id : null,
+                    'created_at' => $loc->created_at ? $loc->created_at->toISOString() : now()->toISOString(),
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $formatted
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération des sites : ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Enregistre ou met à jour un site client (côté responsable)
+     */
+    public function saveClientSite(Request $request)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            $companyId = $user->company_id ?: $user->id;
+
+            $validator = Validator::make($request->all(), [
+                'name' => 'required|string',
+                'latitude' => 'required|numeric',
+                'longitude' => 'required|numeric',
+                'radius_meters' => 'nullable|integer',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Données invalides',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $siteId = $request->input('id');
+            $location = null;
+            if ($siteId && is_numeric($siteId)) {
+                $location = WorkLocation::where('id', $siteId)->where('company_id', $companyId)->first();
+            }
+
+            if (!$location) {
+                $location = new WorkLocation();
+                $location->company_id = $companyId;
+            }
+
+            $location->name = $request->input('name');
+            $location->type = $request->input('type', 'site_client');
+            $location->address = $request->input('address', '');
+            $location->latitude = $request->input('latitude');
+            $location->longitude = $request->input('longitude');
+            $location->max_distance_meters = $request->input('radius_meters', 100);
+            $location->allow_remote_clock = $request->boolean('allow_remote_checkin', true);
+            $location->is_active = true;
+
+            if ($request->filled('arrival_time')) {
+                $location->check_in_start = $request->input('arrival_time');
+            }
+            if ($request->filled('departure_time')) {
+                $location->check_out_end = $request->input('departure_time');
+            }
+            if ($request->filled('branch_id')) {
+                $location->branch_id = $request->input('branch_id');
+            }
+            if ($request->filled('department_id')) {
+                $location->department_id = $request->input('department_id');
+            }
+
+            $location->save();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'id' => (string) $location->id,
+                    'name' => $location->name,
+                    'type' => $location->type,
+                    'address' => $location->address,
+                    'latitude' => (float) $location->latitude,
+                    'longitude' => (float) $location->longitude,
+                    'radius_meters' => (int) $location->max_distance_meters,
+                    'allow_remote_checkin' => (bool) $location->allow_remote_clock,
+                    'arrival_time' => $location->check_in_start ? substr((string)$location->check_in_start, 0, 5) : '08:00',
+                    'departure_time' => $location->check_out_end ? substr((string)$location->check_out_end, 0, 5) : '17:00',
+                    'branch_id' => $location->branch_id ? (string) $location->branch_id : null,
+                    'department_id' => $location->department_id ? (string) $location->department_id : null,
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de l\'enregistrement du site : ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Supprime / désactive un site client
+     */
+    public function deleteClientSite(Request $request, $id)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            $companyId = $user->company_id ?: $user->id;
+
+            $location = WorkLocation::where('id', $id)->where('company_id', $companyId)->first();
+            if ($location) {
+                $location->is_active = false;
+                $location->save();
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Site supprimé avec succès'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la suppression : ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Soumission d'une déclaration de pointage GPS (standard ou hors site)
+     */
+    public function submitGpsDeclaration(Request $request)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            $employee = Employee::where('user_id', $user->id)->first();
+
+            $companyId = $employee ? $employee->company_id : ($user->company_id ?: $user->id);
+            $employeeId = $employee ? $employee->id : ($request->input('employee_id') ?: $user->id);
+            $employeeName = $employee ? $employee->name : ($request->input('employee_name') ?: $user->name);
+
+            $id = $request->input('id') ?: 'gps-dec-' . round(microtime(true) * 1000);
+
+            // Vérifier anti-doublon côté serveur (2 min)
+            $existing = GpsDeclaration::where('employee_id', $employeeId)
+                ->where('date', $request->input('date', now()->toDateString()))
+                ->where('type', $request->input('type', 'entree'))
+                ->orderBy('created_at', 'desc')
+                ->first();
+
+            if ($existing) {
+                $existingTime = Carbon::parse($existing->date . ' ' . $existing->time);
+                $currentTime = Carbon::parse($request->input('date', now()->toDateString()) . ' ' . $request->input('time', now()->toTimeString()));
+                if (abs($currentTime->diffInMinutes($existingTime)) < 2) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Un pointage similaire a déjà été enregistré il y a moins de 2 minutes.'
+                    ], 429);
+                }
+            }
+
+            $declaration = GpsDeclaration::updateOrCreate(
+                ['id' => $id],
+                [
+                    'employee_id' => $employeeId,
+                    'employee_name' => $employeeName,
+                    'employee_department' => $request->input('employee_department'),
+                    'company_id' => $companyId,
+                    'site_id' => $request->input('site_id'),
+                    'site_name' => $request->input('site_name'),
+                    'type' => $request->input('type', 'entree'),
+                    'date' => $request->input('date', now()->toDateString()),
+                    'time' => $request->input('time', now()->toTimeString()),
+                    'original_time' => $request->input('original_time', $request->input('time', now()->toTimeString())),
+                    'latitude' => $request->input('latitude'),
+                    'longitude' => $request->input('longitude'),
+                    'accuracy' => $request->input('accuracy'),
+                    'distance_meters' => $request->input('distance_meters', 0),
+                    'is_mocked' => $request->boolean('is_mocked', false),
+                    'status' => 'En attente',
+                    'is_late' => $request->boolean('is_late', false),
+                    'late_minutes' => $request->input('late_minutes', 0),
+                    'is_offsite' => $request->boolean('is_offsite', false),
+                    'offsite_location_label' => $request->input('offsite_location_label'),
+                    'offsite_reason' => $request->input('offsite_reason'),
+                    'mission_reference' => $request->input('mission_reference'),
+                    'history' => $request->input('history', [
+                        [
+                            'action' => 'CREATION',
+                            'by' => $employeeName,
+                            'date' => now()->toISOString(),
+                            'details' => $request->boolean('is_offsite')
+                                ? 'Déclaration hors site à : ' . $request->input('offsite_location_label')
+                                : 'Déclaration créée sur site : ' . $request->input('site_name')
+                        ]
+                    ]),
+                ]
+            );
+
+            return response()->json([
+                'success' => true,
+                'data' => $declaration
+            ], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de l\'enregistrement de la déclaration : ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Récupère la liste des déclarations GPS (filtrable par employé / responsable)
+     */
+    public function getGpsDeclarations(Request $request)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            $employee = Employee::where('user_id', $user->id)->first();
+
+            $query = GpsDeclaration::query();
+
+            // Si c'est un employé qui appelle, limiter à ses déclarations
+            if ($employee && !$user->is_company) {
+                $query->where('employee_id', $employee->id);
+            } else {
+                // Responsable / RH : voir toutes les déclarations de l'entreprise
+                $companyId = $user->company_id ?: $user->id;
+                $query->where('company_id', $companyId);
+            }
+
+            if ($request->has('status') && $request->input('status') !== 'all') {
+                $query->where('status', $request->input('status'));
+            }
+
+            if ($request->has('date')) {
+                $query->where('date', $request->input('date'));
+            }
+
+            $declarations = $query->orderBy('created_at', 'desc')->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $declarations
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération des déclarations : ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Valide une déclaration GPS et crée automatiquement le pointage officiel dans pointeuses
+     */
+    public function validateGpsDeclaration(Request $request, $id)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            $validatorName = $request->input('notes') ?: ($user->name ?: 'Responsable RH');
+
+            $declaration = GpsDeclaration::find($id);
+            if (!$declaration) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Déclaration introuvable'
+                ], 404);
+            }
+
+            $declaration->status = 'Validée';
+            $declaration->validated_by = $validatorName;
+            $declaration->validated_at = now();
+
+            $history = $declaration->history ?: [];
+            $history[] = [
+                'action' => 'VALIDATION',
+                'by' => $validatorName,
+                'date' => now()->toISOString(),
+                'details' => $declaration->is_offsite
+                    ? 'Pointage hors site validé à : ' . $declaration->offsite_location_label
+                    : 'Pointage validé sur site : ' . $declaration->site_name
+            ];
+            $declaration->history = $history;
+            $declaration->save();
+
+            // CRÉATION AUTOMATIQUE DANS LA TABLE POINTEUSES
+            try {
+                $emp = Employee::find($declaration->employee_id);
+                $locationId = is_numeric($declaration->site_id) ? (int)$declaration->site_id : null;
+
+                Pointeuse::create([
+                    'employee_id' => $declaration->employee_id,
+                    'emp_id' => $declaration->employee_id,
+                    'auth_date_time' => Carbon::parse($declaration->date . ' ' . $declaration->time),
+                    'auth_date' => $declaration->date,
+                    'auth_time' => $declaration->time,
+                    'type' => $declaration->type,
+                    'direction' => $declaration->is_offsite
+                        ? 'Hors site : ' . ($declaration->offsite_location_label ?: 'Déplacement')
+                        : ($declaration->site_name ?: 'Site client'),
+                    'name_device' => $declaration->is_offsite
+                        ? 'Pointage GPS (Hors-site)'
+                        : 'Pointage GPS (Site client)',
+                    'no_device' => $declaration->id,
+                    'location_id' => $locationId,
+                    'card_no' => 'N/A',
+                    'name_emp' => $emp ? $emp->name : $declaration->employee_name,
+                    'status' => 1,
+                    'company_id' => $declaration->company_id,
+                    'scan_status' => $declaration->is_late ? 'retard' : 'a_l_heure',
+                    'duree_retard' => $declaration->late_minutes ?: 0,
+                ]);
+            } catch (\Exception $pEx) {
+                Log::warning('Création pointeuse suite validation GPS : ' . $pEx->getMessage());
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Déclaration validée avec succès et pointage officialisé',
+                'data' => $declaration
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la validation : ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Rejette une déclaration GPS avec motif obligatoire
+     */
+    public function rejectGpsDeclaration(Request $request, $id)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            $validatorName = $user->name ?: 'Responsable RH';
+            $reason = $request->input('reason');
+
+            if (!$reason || !trim($reason)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Le motif du rejet est obligatoire'
+                ], 422);
+            }
+
+            $declaration = GpsDeclaration::find($id);
+            if (!$declaration) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Déclaration introuvable'
+                ], 404);
+            }
+
+            $declaration->status = 'Rejetée';
+            $declaration->rejection_reason = trim($reason);
+
+            $history = $declaration->history ?: [];
+            $history[] = [
+                'action' => 'REJET',
+                'by' => $validatorName,
+                'date' => now()->toISOString(),
+                'reason' => trim($reason),
+                'details' => 'Déclaration rejetée par le responsable.'
+            ];
+            $declaration->history = $history;
+            $declaration->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Déclaration rejetée avec succès',
+                'data' => $declaration
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors du rejet : ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Rectifie l'heure d'une déclaration avec justification obligatoire
+     */
+    public function modifyGpsDeclaration(Request $request, $id)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            $validatorName = $user->name ?: 'Responsable RH';
+            $newTime = $request->input('new_time');
+            $justification = $request->input('justification');
+
+            if (!$newTime || !$justification || !trim($justification)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'La nouvelle heure et la justification sont obligatoires'
+                ], 422);
+            }
+
+            $declaration = GpsDeclaration::find($id);
+            if (!$declaration) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Déclaration introuvable'
+                ], 404);
+            }
+
+            $oldTime = $declaration->time;
+            $declaration->status = 'Modifiée';
+            $declaration->time = $newTime;
+            $declaration->correction_justification = trim($justification);
+
+            $history = $declaration->history ?: [];
+            $history[] = [
+                'action' => 'MODIFICATION',
+                'by' => $validatorName,
+                'date' => now()->toISOString(),
+                'details' => "Heure rectifiée de {$oldTime} à {$newTime}. Justification : " . trim($justification)
+            ];
+            $declaration->history = $history;
+            $declaration->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Déclaration modifiée avec succès',
+                'data' => $declaration
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la modification : ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
 }

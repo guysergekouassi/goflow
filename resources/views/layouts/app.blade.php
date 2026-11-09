@@ -862,6 +862,12 @@
                             <span class="item-label">Dashboard Entreprise</span>
                         </a>
 
+                        <a href="{{ route('company.reports.monthly.index') }}"
+                            class="sidebar-main-item {{ request()->routeIs('company.reports.monthly.*') ? 'active' : '' }}">
+                            <div class="item-icon"><i class="fas fa-calendar-alt"></i></div>
+                            <span class="item-label">Rapports mensuels</span>
+                        </a>
+
                         <!-- Configuration Entreprise -->
                         <a href="{{ route('company.settings.config') }}"
                             class="sidebar-main-item {{ $activeSubmenuId === 'submenu-view-config' ? 'active' : '' }}">

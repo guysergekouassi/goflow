@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Modules\Employees\Models\Employee;
 use Modules\Employees\Models\EmployeeDay;
@@ -728,5 +729,21 @@ class Company extends Model
     {
         $settings = $this->settings ?? [];
         return $settings['location_data'] ?? null;
+    }
+
+    /**
+     * Configuration du rapport mensuel automatique.
+     */
+    public function monthlyReportConfig(): HasOne
+    {
+        return $this->hasOne(MonthlyReportConfig::class);
+    }
+
+    /**
+     * Historique des rapports mensuels générés/envoyés.
+     */
+    public function monthlyReportHistories(): HasMany
+    {
+        return $this->hasMany(MonthlyReportHistory::class);
     }
 }
