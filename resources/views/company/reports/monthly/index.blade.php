@@ -136,15 +136,15 @@
         <div class="col-sm-6 col-lg-3">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="avatar avatar-md me-3 rounded p-2 bg-label-warning text-warning d-flex align-items-center justify-content-center">
+                    <div class="d-flex align-items-start">
+                        <div class="avatar avatar-md me-3 rounded p-2 bg-label-warning text-warning d-flex align-items-center justify-content-center flex-shrink-0" style="min-width:40px;">
                             <i class="ti ti-calendar-event fs-3"></i>
                         </div>
-                        <div>
+                        <div class="overflow-hidden">
                             <span class="text-muted d-block small">Prochain envoi prévu</span>
-                            <h5 class="card-title mb-0 fw-bold text-truncate" title="{{ $nextScheduledDate ?? 'Non configuré' }}">
+                            <p class="card-title mb-0 fw-bold lh-sm" style="font-size:0.9rem; word-break:break-word; white-space:normal;">
                                 {{ $nextScheduledDate ?? 'Non configuré' }}
-                            </h5>
+                            </p>
                         </div>
                     </div>
                     <div class="mt-3 small">
@@ -342,35 +342,33 @@
 
                             {{-- Actions --}}
                             <td class="text-end pe-4">
-                                <div class="btn-group btn-group-sm" role="group">
+                                <div class="d-flex justify-content-end align-items-center gap-1 flex-wrap">
                                     {{-- Téléchargement PDF --}}
                                     @if($history->file_path_pdf || in_array($history->format, ['pdf', 'both']))
                                         <a href="{{ Route::has('company.reports.monthly.download.pdf') ? route('company.reports.monthly.download.pdf', $history->id) : url('/company/reports/monthly/download/' . $history->id . '/pdf') }}"
-                                           class="btn btn-outline-danger"
-                                           title="Télécharger le fichier PDF"
-                                           data-bs-toggle="tooltip"
+                                           class="btn btn-sm btn-outline-danger d-inline-flex align-items-center gap-1"
                                            target="_blank">
                                             <i class="ti ti-file-type-pdf"></i>
+                                            <span>PDF</span>
                                         </a>
                                     @endif
 
                                     {{-- Téléchargement Excel --}}
                                     @if($history->file_path_excel || in_array($history->format, ['excel', 'both']))
                                         <a href="{{ Route::has('company.reports.monthly.download.excel') ? route('company.reports.monthly.download.excel', $history->id) : url('/company/reports/monthly/download/' . $history->id . '/excel') }}"
-                                           class="btn btn-outline-success"
-                                           title="Télécharger le fichier Excel"
-                                           data-bs-toggle="tooltip">
+                                           class="btn btn-sm btn-outline-success d-inline-flex align-items-center gap-1">
                                             <i class="ti ti-file-spreadsheet"></i>
+                                            <span>Excel</span>
                                         </a>
                                     @endif
 
                                     {{-- Bouton Informations détaillées --}}
                                     <button type="button"
-                                            class="btn btn-outline-primary"
+                                            class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
                                             data-bs-toggle="modal"
-                                            data-bs-target="#historyDetailsModal{{ $history->id }}"
-                                            title="Consulter les détails du rapport">
+                                            data-bs-target="#historyDetailsModal{{ $history->id }}">
                                         <i class="ti ti-info-circle"></i>
+                                        <span>Détails</span>
                                     </button>
                                 </div>
                             </td>
