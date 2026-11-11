@@ -2327,7 +2327,7 @@ class SettingsController extends Controller
     <path d="M 50 59 A 24 24 0 0 1 74 35 L 626 35 A 24 24 0 0 1 650 59 L 650 135 L 50 135 Z" fill="url(#headerGrad)"/>
 
     <!-- Titres dans le bandeau -->
-    <text x="350" y="75" text-anchor="middle" fill="#93c5fd" font-size="12" font-weight="700" letter-spacing="2">POINTAGE OFFICIEL &bull; GP-FLOW</text>
+    <text x="350" y="75" text-anchor="middle" fill="#93c5fd" font-size="12" font-weight="700" letter-spacing="2">POINTAGE OFFICIEL &#8226; GP-FLOW</text>
     <text x="350" y="105" text-anchor="middle" fill="#ffffff" font-size="22" font-weight="800">{$safeCompany}</text>
 
     <!-- Sous-titre emplacement -->
