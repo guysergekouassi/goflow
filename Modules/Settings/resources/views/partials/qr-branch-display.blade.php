@@ -1,109 +1,106 @@
 ﻿@extends('layouts.app')
 
-@section('title', 'QR Code Succursale — ' . $branch->name . ' | GP Flow')
+@section('title', 'QR Code Succursale — ' . $branch->name . ' - GP Flow')
 
 @section('content')
 <div class="container-xxl flex-grow-1 container-p-y">
 
-    <!-- En-tête -->
+    {{-- En-tête avec navigation --}}
     <div class="row mb-4">
         <div class="col-12">
-            <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <h4 class="mb-1">
-                        <i class="fas fa-qrcode me-2 text-primary"></i>
-                        QR Code — {{ $branch->name }}
-                    </h4>
-                    <p class="text-muted mb-0">QR Code unique pour la succursale — détection automatique du département</p>
-                    <small class="text-primary">
-                        <i class="fas fa-calendar me-1"></i>{{ now()->format('d/m/Y H:i') }}
-                    </small>
-                </div>
-                <div class="d-flex gap-2">
-                    <a href="{{ route('company.settings.branches.index') }}" class="btn btn-outline-secondary">
-                        <i class="fas fa-arrow-left me-1"></i>Retour
-                    </a>
+            <div class="card border-0 shadow-sm" style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);">
+                <div class="card-body py-4 px-4 text-white">
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+                        <div>
+                            <div class="d-flex align-items-center gap-2 mb-1">
+                                <span class="badge bg-white text-primary fw-semibold px-2 py-1">
+                                    <i class="ti ti-qrcode me-1"></i>QR Code Unique de Site
+                                </span>
+                                <span class="badge bg-success text-white px-2 py-1">
+                                    <i class="ti ti-check me-1"></i>Détection automatique
+                                </span>
+                            </div>
+                            <h3 class="fw-bold text-white mb-1">QR Code de Pointage — {{ $branch->name }}</h3>
+                            <p class="text-white-50 mb-0">
+                                Valide pour tous les départements et employés de ce site &bull; {{ $company->name }}
+                            </p>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2">
+                            <a href="{{ route('company.settings.attendance-system.index') }}" class="btn btn-outline-light d-inline-flex align-items-center gap-1">
+                                <i class="ti ti-arrow-left"></i>
+                                <span>Retour aux paramètres</span>
+                            </a>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <div class="row justify-content-center">
-        <div class="col-lg-7 col-md-9">
-            <div class="card shadow-sm">
-                <div class="card-header bg-primary text-white">
-                    <div class="d-flex align-items-center">
-                        <i class="fas fa-building me-2"></i>
+        <div class="col-lg-8 col-xl-7">
+            <div class="card border-0 shadow-sm qr-presentation-card">
+                
+                {{-- En-tête de la carte --}}
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="avatar avatar-sm rounded bg-label-primary text-primary d-flex align-items-center justify-content-center">
+                            <i class="ti ti-building fs-4"></i>
+                        </div>
                         <div>
-                            <h5 class="mb-0 text-white">{{ $branch->name }}</h5>
-                            <small class="opacity-75">QR Code de Pointage — Toutes Départements</small>
+                            <h5 class="card-title mb-0 fw-bold text-dark">{{ $branch->name }}</h5>
+                            <small class="text-muted">Succursale / Site &bull; Code: {{ $branch->code ?? 'N/A' }}</small>
                         </div>
                     </div>
+                    <span class="badge bg-label-secondary">
+                        <i class="ti ti-clock me-1"></i>{{ date('d/m/Y H:i', $timestamp) }}
+                    </span>
                 </div>
-                <div class="card-body text-center py-4">
 
-                    <!-- QR Code image -->
-                    <div class="qr-wrapper d-inline-block p-3 bg-white rounded-3 shadow mb-4" id="qrContainer">
-                        <img src="data:image/svg+xml;base64,{{ $qrCode }}"
-                             alt="QR Code — {{ $branch->name }}"
-                             class="img-fluid qr-img"
-                             id="qrImage"
-                             style="max-width: {{ $size }}px; display:block;">
-                        <div class="mt-2 text-center" style="color:#1a3a6b; font-weight:700; font-size:.8rem; letter-spacing:1px;">
-                            {{ strtoupper($branch->name) }}
+                <div class="card-body p-4 text-center">
+
+                    {{-- Explication de la détection automatique --}}
+                    <div class="alert alert-primary d-flex align-items-center mb-4 text-start" role="alert">
+                        <i class="ti ti-bulb fs-3 me-3 text-primary flex-shrink-0"></i>
+                        <div class="small">
+                            <strong>QR Code Intelligent :</strong> Ce QR Code unique est commun à tous les services du site. Lorsqu'un employé le scanne, le système identifie automatiquement son département et applique la plage horaire correspondante.
                         </div>
                     </div>
 
-                    <!-- Info boxes -->
-                    <div class="row g-3 mb-4 text-start">
-                        <div class="col-md-6">
-                            <div class="alert alert-primary mb-0 py-2 px-3">
-                                <small>
-                                    <strong><i class="fas fa-building me-1"></i>Entreprise :</strong> {{ $company->name }}<br>
-                                    <strong><i class="fas fa-map-marker-alt me-1"></i>Succursale :</strong> {{ $branch->name }}<br>
-                                    @if($branch->code)
-                                    <strong><i class="fas fa-hashtag me-1"></i>Code :</strong> {{ $branch->code }}<br>
-                                    @endif
-                                    <strong><i class="fas fa-clock me-1"></i>Généré le :</strong> {{ date('d/m/Y H:i', $timestamp) }}
-                                </small>
-                            </div>
+                    {{-- Cadre stylisé du QR Code --}}
+                    <div class="qr-code-frame d-inline-flex flex-column align-items-center p-4 bg-white rounded-4 shadow-sm border mb-4">
+                        <div class="qr-image-container position-relative">
+                            <img src="data:image/svg+xml;base64,{{ $qrCode }}" 
+                                 alt="QR Code Site - {{ $branch->name }}" 
+                                 class="img-fluid rounded-2 qr-svg-image" 
+                                 style="width: 280px; max-width: 100%; height: auto; display: block;">
                         </div>
-                        <div class="col-md-6">
-                            <div class="alert alert-success mb-0 py-2 px-3">
-                                <small>
-                                    <strong><i class="fas fa-magic me-1"></i>Logique automatique :</strong><br>
-                                    ✅ Un seul QR pour TOUS les départements<br>
-                                    🔍 Détection auto du département de l'employé<br>
-                                    ⏰ Horaires appliqués selon le département<br>
-                                    🚫 Accès refusé si mauvaise succursale
-                                </small>
-                            </div>
+                        <div class="mt-3 text-center">
+                            <span class="badge bg-label-dark px-3 py-2 fw-semibold text-uppercase" style="letter-spacing: 0.5px;">
+                                <i class="ti ti-building me-1"></i>{{ $branch->name }}
+                            </span>
                         </div>
                     </div>
 
-                    <!-- Tranches horaires couvertes par CE QR Code -->
+                    {{-- Tranches horaires couvertes par ce QR --}}
                     @isset($schedule)
-                    <div class="card border-0 bg-light text-start mb-4">
+                    <div class="card border bg-light text-start mb-4 shadow-none">
                         <div class="card-body py-3 px-3">
-                            <h6 class="mb-1">
-                                <i class="fas fa-clock text-primary me-1"></i>
-                                Tranches horaires couvertes par ce QR Code
-                            </h6>
-                            <small class="text-muted d-block mb-3">
-                                Ce site n'a qu'un seul QR Code. Au scan, l'horaire appliqué est celui du département
-                                de l'employé ; à défaut, l'horaire par défaut du site.
-                            </small>
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <i class="ti ti-clock text-primary fs-5"></i>
+                                <h6 class="mb-0 fw-bold text-dark">Horaires appliqués lors du scan</h6>
+                            </div>
 
                             @if(count($schedule['rows']) > 0)
                             <div class="table-responsive">
-                                <table class="table table-sm table-borderless align-middle mb-0" style="font-size:.82rem;">
+                                <table class="table table-sm table-hover align-middle mb-0 bg-white rounded border">
                                     <thead class="table-light">
                                         <tr>
                                             <th>Département</th>
                                             <th>Montée</th>
                                             <th>Descente</th>
                                             <th class="text-center">Effectif</th>
-                                            <th>Horaire appliqué</th>
+                                            <th>Règle</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -113,33 +110,33 @@
                                                 @if($row['department'])
                                                     <strong>{{ $row['department']->name }}</strong>
                                                 @else
-                                                    <em class="text-muted">Sans département</em>
+                                                    <span class="text-muted">Par défaut</span>
                                                 @endif
                                             </td>
                                             <td>
                                                 @if($row['check_in'])
-                                                    <code>{{ $row['check_in'] }}</code>
+                                                    <code class="text-success">{{ $row['check_in'] }}</code>
                                                 @else
-                                                    <span class="text-muted">--</span>
+                                                    <span class="text-muted">--:--</span>
                                                 @endif
                                             </td>
                                             <td>
                                                 @if($row['check_out'])
-                                                    <code>{{ $row['check_out'] }}</code>
+                                                    <code class="text-danger">{{ $row['check_out'] }}</code>
                                                 @else
-                                                    <span class="text-muted">--</span>
+                                                    <span class="text-muted">--:--</span>
                                                 @endif
                                             </td>
-                                            <td class="text-center">{{ $row['headcount'] }}</td>
+                                            <td class="text-center">
+                                                <span class="badge bg-label-secondary">{{ $row['headcount'] }}</span>
+                                            </td>
                                             <td>
                                                 @if($row['source'] === 'department')
-                                                    <span class="badge bg-label-primary">Horaire du département</span>
+                                                    <span class="badge bg-label-primary">Département</span>
                                                 @elseif($row['source'] === 'site')
-                                                    <span class="badge bg-label-info">Horaire du site</span>
+                                                    <span class="badge bg-label-info">Site</span>
                                                 @else
-                                                    <span class="badge bg-label-secondary" title="Pointage enregistré sans contrôle de retard">
-                                                        Mode libre
-                                                    </span>
+                                                    <span class="badge bg-label-secondary">Libre</span>
                                                 @endif
                                             </td>
                                         </tr>
@@ -148,93 +145,47 @@
                                 </table>
                             </div>
                             @else
-                            <div class="alert alert-warning py-2 px-3 mb-0">
-                                <small>Aucun département ni employé rattaché à ce site pour le moment.</small>
-                            </div>
-                            @endif
-
-                            @if(!$schedule['site_default'] && !$schedule['has_department_schedules'])
-                            <div class="alert alert-warning py-2 px-3 mt-3 mb-0">
-                                <small>
-                                    <i class="fas fa-exclamation-triangle me-1"></i>
-                                    Aucune tranche horaire n'est définie pour ce site : le QR fonctionne, mais les
-                                    pointages sont enregistrés <strong>sans contrôle de retard</strong>.
-                                    <a href="{{ route('company.settings.work-locations.index') }}">Définir les horaires</a>
-                                </small>
-                            </div>
+                            <p class="text-muted small mb-0">Aucun horaire spécifique défini pour ce site.</p>
                             @endif
                         </div>
                     </div>
                     @endisset
 
-                    <!-- Statuts expliqués -->
-                    <div class="alert alert-info text-start py-2 px-3 mb-4">
-                        <small>
-                            <strong><i class="fas fa-info-circle me-1"></i>Statuts de scan :</strong><br>
-                            <span class="badge bg-success me-1">✅ À l'heure</span> Arrivée avant l'heure limite<br>
-                            <span class="badge bg-danger me-1">⏰ Retard</span> Arrivée après <code>check_in_end</code> du département<br>
-                            <span class="badge bg-warning text-dark me-1">⚡ En avance</span> Départ avant <code>check_out_start</code> du département<br>
-                            <span class="badge bg-secondary me-1">♾ Libre</span> Aucun WorkLocation configuré pour ce département
-                        </small>
-                    </div>
-
-                    <!-- Actions -->
-                    <div class="d-flex flex-wrap justify-content-center gap-3">
+                    {{-- Boutons d'action --}}
+                    <div class="d-flex flex-wrap justify-content-center gap-2 pt-2 border-top">
                         <form action="{{ route('company.settings.attendance-system.qr-code-download') }}" method="POST" class="d-inline">
                             @csrf
                             <input type="hidden" name="qr_string" value="{{ $qrString }}">
                             <input type="hidden" name="location_name" value="{{ $branch->name }}_succursale">
                             <input type="hidden" name="size" value="{{ $size }}">
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-download me-2"></i>Télécharger le QR Code
+                            <button type="submit" class="btn btn-primary d-inline-flex align-items-center gap-1 shadow-sm">
+                                <i class="ti ti-download fs-5"></i>
+                                <span>Télécharger le QR Code</span>
                             </button>
                         </form>
 
-                        <button type="button" class="btn btn-outline-secondary" onclick="printQR()">
-                            <i class="fas fa-print me-2"></i>Imprimer
+                        <button type="button" class="btn btn-outline-secondary d-inline-flex align-items-center gap-1" onclick="window.print()">
+                            <i class="ti ti-printer fs-5"></i>
+                            <span>Imprimer</span>
                         </button>
 
-                        {{-- Depuis le back-office on reste dans le dashboard : le portail
-                             plein écran est réservé au scan du QR sur mobile / tablette. --}}
-                        <a href="{{ route('company.times.qrcode-pointage.collective', ['branch_id' => $branch->id]) }}"
-                           class="btn btn-outline-info">
-                            <i class="fas fa-users me-2"></i>Pointage collectif
+                        <a href="{{ route('company.times.qrcode-pointage.collective', ['branch_id' => $branch->id]) }}" class="btn btn-outline-info d-inline-flex align-items-center gap-1">
+                            <i class="ti ti-users fs-5"></i>
+                            <span>Pointage collectif</span>
                         </a>
 
                         <a href="{{ route('company.settings.branches.qr-code', ['branch' => $branch->id, 'regenerate' => 1]) }}"
-                           class="btn btn-outline-warning"
-                           onclick="return confirm('Régénérer le QR Code de « {{ $branch->name }} » ?\n\nLe QR actuel deviendra immédiatement invalide : il faudra réimprimer et redistribuer le nouveau code.');">
-                            <i class="fas fa-sync-alt me-2"></i>Régénérer
+                           class="btn btn-outline-warning d-inline-flex align-items-center gap-1"
+                           onclick="return confirm('Régénérer le QR Code de « {{ $branch->name }} » ?\n\nLe QR actuel deviendra immédiatement invalide.');">
+                            <i class="ti ti-refresh fs-5"></i>
+                            <span>Régénérer</span>
                         </a>
-
-                        <form action="{{ route('company.settings.branches.qr-code.destroy', $branch->id) }}" method="POST" class="d-inline"
-                              onsubmit="return confirm('Supprimer le QR Code de « {{ $branch->name }} » ?\n\nTous les QR Codes déjà imprimés ou distribués pour ce site seront immédiatement refusés au pointage.');">
-                            @csrf
-                            @method('DELETE')
-                            <button type="submit" class="btn btn-outline-danger">
-                                <i class="fas fa-trash me-2"></i>Supprimer le QR Code
-                            </button>
-                        </form>
-                    </div>
-
-                    <div class="alert alert-warning text-start py-2 px-3 mt-4 mb-0">
-                        <small>
-                            <i class="fas fa-exclamation-triangle me-1"></i>
-                            <strong>Supprimer</strong> révoque définitivement ce QR Code : les exemplaires déjà affichés sur site
-                            cessent de fonctionner et le pointage par QR est bloqué pour cette succursale jusqu'à la génération
-                            d'un nouveau code. <strong>Régénérer</strong> remplace le code par un nouveau, à réimprimer.
-                        </small>
                     </div>
                 </div>
-            </div>
 
-            <!-- URL encodée dans le QR -->
-            <div class="card mt-3">
-                <div class="card-body py-2">
-                    <small class="text-muted">
-                        <i class="fas fa-link me-1"></i>
-                        <strong>URL encodée dans le QR :</strong>
-                        <code class="ms-1" style="font-size:.78rem; word-break:break-all;">{{ $qrString }}</code>
+                <div class="card-footer bg-light border-top py-2 px-3 text-center">
+                    <small class="text-muted" style="word-break: break-all; font-size: 0.78rem;">
+                        <i class="ti ti-link me-1"></i><strong>URL encodée :</strong> {{ $qrString }}
                     </small>
                 </div>
             </div>
@@ -245,24 +196,55 @@
 
 @push('styles')
 <style>
-    .qr-wrapper { transition: box-shadow .3s; }
-    .qr-wrapper:hover { box-shadow: 0 8px 30px rgba(26,58,107,.2) !important; }
-    .qr-img { border-radius: 6px; }
+    .qr-presentation-card {
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    .qr-code-frame {
+        border: 2px dashed #cbd5e1;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        background-color: #ffffff;
+    }
+    .qr-code-frame:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04) !important;
+        border-color: #3b82f6;
+    }
+    .qr-svg-image {
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    }
 
     @media print {
-        .breadcrumb, .header-navbar, .main-menu, .btn, form,
-        .alert-info, .alert-success, .card:last-child { display: none !important; }
-        .card { border: none !important; box-shadow: none !important; }
-        .card-header { background: none !important; border-bottom: 1px solid #ddd !important; color: #000 !important; }
-        .card-header * { color: #000 !important; }
-        .alert-primary { border: 1px solid #ccc !important; background: #f8f9fa !important; color: #000 !important; }
-        .qr-wrapper { box-shadow: none !important; }
+        body {
+            background: #ffffff !important;
+            color: #000000 !important;
+        }
+        .layout-navbar,
+        .layout-menu,
+        .content-footer,
+        .btn,
+        form,
+        .alert,
+        .card-footer,
+        .badge.bg-label-secondary {
+            display: none !important;
+        }
+        .container-xxl {
+            padding: 0 !important;
+            max-width: 100% !important;
+        }
+        .card {
+            border: none !important;
+            box-shadow: none !important;
+        }
+        .qr-code-frame {
+            border: 2px solid #000000 !important;
+            padding: 20px !important;
+        }
+        .qr-svg-image {
+            width: 380px !important;
+            max-width: 100% !important;
+        }
     }
 </style>
-@endpush
-
-@push('scripts')
-<script>
-function printQR() { window.print(); }
-</script>
 @endpush
