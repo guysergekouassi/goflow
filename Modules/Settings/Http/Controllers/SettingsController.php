@@ -2275,21 +2275,88 @@ class SettingsController extends Controller
             return redirect()->back()->withErrors($validator)->withInput();
         }
 
-        $size = $request->size ?? 500;
+        $qrSize = 420;
         $locationName = $request->location_name;
+        $companyName = Auth::user()->company->name ?? 'GP-FLOW';
         
-        // Générer le QR code en format SVG
-        $qrCodeSvg = QrCode::format('svg')
-                        ->size($size)
+        // Générer le QR code SVG interne
+        $rawQrSvg = QrCode::format('svg')
+                        ->size($qrSize)
                         ->errorCorrection('H')
                         ->encoding('UTF-8')
                         ->generate($request->qr_string);
+
+        // Extraire uniquement le contenu intérieur du SVG (sans la balise racine <svg> et sans le rect de fond blanc)
+        $innerSvg = preg_replace('/<\?xml.*?\?>/s', '', (string)$rawQrSvg);
+        $innerSvg = preg_replace('/<svg[^>]*>/', '', $innerSvg);
+        $innerSvg = preg_replace('/<\/svg>/', '', $innerSvg);
+        // Supprimer le premier <rect ... fill="#ffffff"/> généré par la lib pour éviter un double fond décalé
+        $innerSvg = preg_replace('/<rect\s+x="0"\s+y="0"[^>]*\/>/i', '', $innerSvg, 1);
+
+        // Dimensions de la fiche SVG élégante et centrée
+        $canvasWidth = 700;
+        $canvasHeight = 850;
+        $qrX = (int)(($canvasWidth - $qrSize) / 2); // 140
+        $qrY = 195;
+
+        $safeLocation = htmlspecialchars($locationName, ENT_QUOTES, 'UTF-8');
+        $safeCompany = htmlspecialchars($companyName, ENT_QUOTES, 'UTF-8');
+        $generatedDate = date('d/m/Y H:i');
+
+        // Construire une affiche SVG officielle, centrée, responsive et prête à imprimer
+        $posterSvg = <<<SVG
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {$canvasWidth} {$canvasHeight}" width="100%" height="100%" style="background-color:#f1f5f9; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+    <defs>
+        <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#1e3a8a"/>
+            <stop offset="100%" stop-color="#2563eb"/>
+        </linearGradient>
+        <filter id="cardShadow" x="-10%" y="-5%" width="120%" height="115%">
+            <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#0f172a" flood-opacity="0.1"/>
+        </filter>
+        <filter id="qrShadow" x="-10%" y="-10%" width="120%" height="120%">
+            <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.06"/>
+        </filter>
+    </defs>
+
+    <!-- Fiche centrale blanche -->
+    <rect x="50" y="35" width="600" height="780" rx="24" fill="#ffffff" filter="url(#cardShadow)"/>
+
+    <!-- Bandeau supérieur avec dégradé GP-FLOW -->
+    <path d="M 50 59 A 24 24 0 0 1 74 35 L 626 35 A 24 24 0 0 1 650 59 L 650 135 L 50 135 Z" fill="url(#headerGrad)"/>
+
+    <!-- Titres dans le bandeau -->
+    <text x="350" y="75" text-anchor="middle" fill="#93c5fd" font-size="12" font-weight="700" letter-spacing="2">POINTAGE OFFICIEL &bull; GP-FLOW</text>
+    <text x="350" y="105" text-anchor="middle" fill="#ffffff" font-size="22" font-weight="800">{$safeCompany}</text>
+
+    <!-- Sous-titre emplacement -->
+    <text x="350" y="165" text-anchor="middle" fill="#0f172a" font-size="17" font-weight="700">{$safeLocation}</text>
+
+    <!-- Cadre blanc du QR Code avec bordure subtile -->
+    <rect x="{$qrX}" y="{$qrY}" width="{$qrSize}" height="{$qrSize}" rx="16" fill="#ffffff" stroke="#e2e8f0" stroke-width="2" filter="url(#qrShadow)"/>
+
+    <!-- Insertion du QR Code au centre exact -->
+    <g transform="translate({$qrX}, {$qrY})">
+        {$innerSvg}
+    </g>
+
+    <!-- Badge bas d'instruction -->
+    <rect x="175" y="640" width="350" height="42" rx="21" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <text x="350" y="666" text-anchor="middle" fill="#334155" font-size="13" font-weight="600">Scannez pour valider votre présence</text>
+
+    <!-- Pied de page officiel -->
+    <line x1="90" y1="715" x2="610" y2="715" stroke="#f1f5f9" stroke-width="1.5"/>
+    <text x="350" y="745" text-anchor="middle" fill="#64748b" font-size="12" font-weight="500">Document officiel généré le {$generatedDate}</text>
+    <text x="350" y="768" text-anchor="middle" fill="#94a3b8" font-size="11">Système de gestion et suivi des pointages GP-FLOW</text>
+</svg>
+SVG;
 
         // Créer un nom de fichier sécurisé
         $fileName = 'QRCode_' . Str::slug($locationName) . '_' . date('Y-m-d_His') . '.svg';
 
         // Retourner le fichier en téléchargement
-        return response($qrCodeSvg)
+        return response($posterSvg)
             ->header('Content-Type', 'image/svg+xml')
             ->header('Content-Disposition', 'attachment; filename="' . $fileName . '"');
     }

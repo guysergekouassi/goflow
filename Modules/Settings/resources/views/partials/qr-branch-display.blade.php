@@ -1,4 +1,4 @@
-﻿@extends('layouts.app')
+@extends('layouts.app')
 
 @section('title', 'QR Code Succursale — ' . $branch->name . ' - GP Flow')
 
