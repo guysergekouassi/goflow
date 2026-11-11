@@ -530,7 +530,7 @@ class SettingsController extends Controller
                 'manager_id' => 'nullable|exists:users,id',
                 'has_time_clock' => 'nullable|boolean',
                 'allow_remote_clock' => 'nullable|boolean',
-                'max_distance_meters' => 'nullable|integer|min:10|max:1000',
+                'max_distance_meters' => 'nullable|integer|min:5|max:5000',
                 'is_active' => 'nullable|boolean',
                 'latitude' => 'nullable|numeric|between:-90,90',
                 'longitude' => 'nullable|numeric|between:-180,180',
@@ -636,7 +636,7 @@ class SettingsController extends Controller
                 'manager_id' => 'nullable|exists:users,id',
                 'has_time_clock' => 'nullable|boolean',
                 'allow_remote_clock' => 'nullable|boolean',
-                'max_distance_meters' => 'nullable|integer|min:10|max:1000',
+                'max_distance_meters' => 'nullable|integer|min:5|max:5000',
                 'is_active' => 'nullable|boolean',
                 'latitude' => 'nullable|numeric|between:-90,90',
                 'longitude' => 'nullable|numeric|between:-180,180',
@@ -1983,20 +1983,22 @@ class SettingsController extends Controller
             $company = $user->company;
 
             $request->validate([
-                'default_attendance_type' => 'required|in:manual,qr_code',
-                'allow_multiple_types' => 'nullable|boolean',
+                'default_attendance_type' => 'required|in:manual,qr_code,biometric',
+                'allow_multiple_types' => 'nullable',
                 'qr_code_settings' => 'nullable|array'
             ]);
 
+            $allowMultiple = $request->boolean('allow_multiple_types');
+
             $company->update([
                 'default_attendance_type' => $request->default_attendance_type,
-                'allow_multiple_attendance_types' => $request->has('allow_multiple_types'),
+                'allow_multiple_attendance_types' => $allowMultiple,
                 'attendance_settings' => [
                     'qr_code' => $request->qr_code_settings,
                 ]
             ]);
 
-            if (!$request->has('allow_multiple_types')) {
+            if (!$allowMultiple) {
                 $company->users()->update([
                     'attendance_type' => $request->default_attendance_type
                 ]);

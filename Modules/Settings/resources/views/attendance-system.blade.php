@@ -252,7 +252,8 @@
                             <div class="col-md-6 mb-3">
                                 <label class="form-label">Politique de Types Multiples</label>
                                 <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="allow_multiple_types" id="allowMultipleTypes"
+                                    <input type="hidden" name="allow_multiple_types" value="0">
+                                    <input class="form-check-input" type="checkbox" name="allow_multiple_types" id="allowMultipleTypes" value="1"
                                             {{ old('allow_multiple_types', $company->allow_multiple_attendance_types ?? false) ? 'checked' : '' }}>
                                     <label class="form-check-label" for="allowMultipleTypes">
                                         Autoriser plusieurs types de présence
@@ -293,7 +294,8 @@
                             <div class="col-md-6 mb-3">
                                 <label class="form-label">Géolocalisation Requise</label>
                                 <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="qr_code_settings[require_location]" id="requireLocation"
+                                    <input type="hidden" name="qr_code_settings[require_location]" value="0">
+                                    <input class="form-check-input" type="checkbox" name="qr_code_settings[require_location]" id="requireLocation" value="1"
                                         {{ old('qr_code_settings.require_location', $company->attendance_settings['qr_code']['require_location'] ?? true) ? 'checked' : '' }}>
                                     <label class="form-check-label" for="requireLocation">
                                         Exiger la géolocalisation
@@ -362,7 +364,8 @@
                         </div>
 
                         <div class="form-check mb-3">
-                            <input class="form-check-input" type="checkbox" name="biometric_settings[require_verification]" id="requireVerification"
+                            <input type="hidden" name="biometric_settings[require_verification]" value="0">
+                            <input class="form-check-input" type="checkbox" name="biometric_settings[require_verification]" id="requireVerification" value="1"
                                 {{ old('biometric_settings.require_verification', $company->attendance_settings['biometric']['require_verification'] ?? true) ? 'checked' : '' }}>
                             <label class="form-check-label" for="requireVerification">
                                 Vérification en double obligatoire
