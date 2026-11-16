@@ -173,6 +173,9 @@
                                                 @if($location->department)
                                                     <span class="badge bg-label-warning ms-1">🏷️ {{ $location->department->name }}</span>
                                                 @endif
+                                                @if($location->latitude && $location->longitude)
+                                                    <span class="badge bg-label-primary ms-1"><i class="fas fa-crosshairs me-1"></i>Rayon: {{ $location->max_distance_meters ?: 100 }} m</span>
+                                                @endif
                                             </div>
                                             <div class="text-end">
                                                 @if($location->check_in_start)
@@ -287,16 +290,20 @@
                     </div>
 
                     <div class="row">
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
                             <label class="form-label">Latitude (GPS)</label>
                             <input type="text" class="form-control" id="latitude" name="latitude" inputmode="decimal" placeholder="5.3600">
                         </div>
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
                             <label class="form-label">Longitude (GPS)</label>
                             <input type="text" class="form-control" id="longitude" name="longitude" inputmode="decimal" placeholder="-4.0083">
                         </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label"><i class="fas fa-crosshairs me-1 text-primary"></i>Rayon autorisé (mètres)</label>
+                            <input type="number" class="form-control" id="max_distance_meters" name="max_distance_meters" value="100" min="5" max="5000">
+                        </div>
                         <div class="col-12 mb-3">
-                            <small class="text-muted">Remplies par la recherche d'adresse, souvent approximative. Pour le pointage GPS d'un site client, saisissez la position exacte du bâtiment : sur Google Maps, clic droit sur le bâtiment, cliquez sur les coordonnées pour les copier, puis collez-les dans le champ Latitude.</small>
+                            <small class="text-muted">Périmètre géographique autorisé par l'entreprise pour valider le pointage de l'employé (ex : 10 m pour le portail, 25 m pour le bâtiment, 100 m pour un site étendu). L'employé ne peut pointer que s'il se trouve dans ce rayon.</small>
                         </div>
                     </div>
 
@@ -380,13 +387,7 @@
                         </div>
                     </div>
 
-                    <div id="timeClockSettings" style="display:none;">
-                        <div class="mb-3">
-                            <label class="form-label">Distance Max (mètres)</label>
-                            <input type="number" class="form-control" name="max_distance_meters" value="100" min="10" max="1000">
-                            <small class="text-muted">Rayon autour du site où le pointage GPS compte aussitôt. Bureau : 25 m pour pointer dès le portail ; site client : 100 m ou plus.</small>
-                        </div>
-                    </div>
+
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
@@ -472,16 +473,20 @@
                     </div>
 
                     <div class="row">
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
                             <label class="form-label">Latitude (GPS)</label>
                             <input type="text" class="form-control" id="edit_latitude" name="latitude" inputmode="decimal" placeholder="5.3600">
                         </div>
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
                             <label class="form-label">Longitude (GPS)</label>
                             <input type="text" class="form-control" id="edit_longitude" name="longitude" inputmode="decimal" placeholder="-4.0083">
                         </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label"><i class="fas fa-crosshairs me-1 text-primary"></i>Rayon autorisé (mètres)</label>
+                            <input type="number" class="form-control" name="max_distance_meters" id="edit_max_distance_meters" value="100" min="5" max="5000">
+                        </div>
                         <div class="col-12 mb-3">
-                            <small class="text-muted">Pour le pointage GPS d'un site client, saisissez la position exacte du bâtiment : sur Google Maps, clic droit sur le bâtiment, cliquez sur les coordonnées pour les copier, puis collez-les dans le champ Latitude.</small>
+                            <small class="text-muted">Périmètre géographique autorisé par l'entreprise pour valider le pointage de l'employé (ex : 10 m, 25 m, 50 m, 100 m...).</small>
                         </div>
                     </div>
 
@@ -576,13 +581,7 @@
                         </div>
                     </div>
 
-                    <div id="editTimeClockSettings" style="display:none;">
-                        <div class="mb-3">
-                            <label class="form-label">Distance Max (mètres)</label>
-                            <input type="number" class="form-control" name="max_distance_meters" id="edit_max_distance_meters" value="100" min="10" max="1000">
-                            <small class="text-muted">Rayon autour du site où le pointage GPS compte aussitôt. Bureau : 25 m pour pointer dès le portail ; site client : 100 m ou plus.</small>
-                        </div>
-                    </div>
+
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
@@ -1000,9 +999,11 @@
         document.getElementById('edit_check_out_start').value = parseTime(locationData.check_out_start) || '17:00';
         document.getElementById('edit_check_out_end').value = parseTime(locationData.check_out_end) || '18:30';
 
-        // Pointage à distance GPS : le rayon est toujours rechargé, sinon l'enregistrement l'écraserait
-        document.getElementById('edit_max_distance_meters').value = locationData.max_distance_meters || '100';
-        document.getElementById('editTimeClockSettings').style.display = locationData.allow_remote_clock ? 'block' : 'none';
+        // Rayon de pointage GPS configuré pour le site
+        const editMaxDist = document.getElementById('edit_max_distance_meters');
+        if (editMaxDist) {
+            editMaxDist.value = locationData.max_distance_meters || '100';
+        }
 
         // Mettre à jour l'action du formulaire
         document.getElementById('editWorkLocationForm').action = `{{ url('/company/settings/work-locations') }}/${id}`;

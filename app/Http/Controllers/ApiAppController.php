@@ -3548,6 +3548,7 @@ class ApiAppController extends Controller
             'mocked' => 'sometimes|boolean',
             'type' => 'sometimes|string|in:entree,sortie',
             'motif' => 'sometimes|nullable|string|max:500',
+            'client_timestamp' => 'sometimes|nullable|numeric',
             'device_info' => 'required|array',
             'device_info.name' => 'required|string',
             'device_info.model' => 'required|string',
@@ -3579,19 +3580,7 @@ class ApiAppController extends Controller
                 ], 403);
             }
 
-            // Mêmes règles d'entrée / sortie que le scan QR
-            $maintenant = Carbon::now();
-            $refus = $this->refusEnchainementPointage(
-                $employee,
-                $request->input('type') ?: $this->determinerTypePointage($employee->id, $maintenant),
-                $maintenant
-            );
-            if ($refus) {
-                return response()->json(['success' => false, 'message' => $refus], 409);
-            }
-
-            // Android signale les positions fournies par une application de faux GPS.
-            // Contrairement à un pointage hors site, ce cas reste un refus.
+            // Android/iOS signale les positions fournies par une application de faux GPS.
             if ($request->boolean('mocked')) {
                 return response()->json([
                     'success' => false,
@@ -3599,79 +3588,88 @@ class ApiAppController extends Controller
                 ], 403);
             }
 
-            $accuracy = (int) round((float) $request->input('accuracy'));
+            // Déterminer l'heure réelle de pointage (horodatage client si frais et valide, sinon heure serveur)
+            $now = Carbon::now();
+            if ($request->filled('client_timestamp')) {
+                $rawTs = (float) $request->input('client_timestamp');
+                $tsSec = $rawTs > 9999999999 ? (int) round($rawTs / 1000) : (int) round($rawTs);
+                if ($tsSec > 0 && abs($now->timestamp - $tsSec) <= 60) {
+                    $now = Carbon::createFromTimestamp($tsSec);
+                }
+            }
 
-            if ($accuracy > self::GPS_MAX_ACCURACY_METERS) {
+            $pointageType = $request->input('type') ?: $this->determinerTypePointage($employee->id, $now);
+
+            // Mêmes règles d'entrée / sortie que le scan QR (anti-doublon)
+            $refus = $this->refusEnchainementPointage($employee, $pointageType, $now);
+            if ($refus) {
+                return response()->json(['success' => false, 'message' => $refus], 409);
+            }
+
+            // 1. Identifier le site de pointage auquel cet employé est associé
+            $site = $this->resolveEmployeeWorkLocation($employee);
+
+            if (!$site) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Aucun site de pointage configuré pour votre profil ou votre entreprise. Rapprochez-vous du service RH.'
+                ], 422);
+            }
+
+            // 2. Récupérer les coordonnées GPS de ce site
+            if (is_null($site->latitude) || is_null($site->longitude)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Les coordonnées GPS du site « ' . $site->name . ' » ne sont pas configurées. Rapprochez-vous de votre administrateur.'
+                ], 422);
+            }
+
+            // 3. Récupérer le rayon de pointage autorisé configuré par l'entreprise
+            $rayon = (int) ($site->max_distance_meters ?: self::GPS_DEFAULT_RADIUS_METERS);
+
+            // 4. Vérifier la précision GPS
+            $accuracy = (int) round((float) $request->input('accuracy'));
+            if ($accuracy > self::GPS_MAX_ACCURACY_METERS || ($rayon <= 15 && $accuracy > 30)) {
                 return response()->json([
                     'success' => false,
                     'message' => '📡 Position trop imprécise (± ' . $accuracy . ' m). Activez la localisation précise, rapprochez-vous d\'une fenêtre ou sortez, puis réessayez.',
                     'gps_accuracy' => $accuracy,
+                    'rayon' => $rayon,
                 ], 422);
             }
 
-            // Emplacements ouverts au pointage à distance. Un emplacement rattaché à
-            // une succursale ou à un service reste réservé aux employés de celui-ci.
-            $sites = WorkLocation::where('company_id', $employee->company_id)
-                ->where('is_active', 1)
-                ->where('allow_remote_clock', 1)
-                ->whereNotNull('latitude')
-                ->whereNotNull('longitude')
-                ->where(function ($q) use ($employee) {
-                    $q->whereNull('branch_id')->orWhere('branch_id', $employee->branch_id);
-                })
-                ->where(function ($q) use ($employee) {
-                    $q->whereNull('department_id')->orWhere('department_id', $employee->department_id);
-                })
-                ->get();
-
+            // 5. Calculer la distance réelle entre la position de l'employé et le site
             $latitude = (float) $request->input('latitude');
             $longitude = (float) $request->input('longitude');
+            $distance = (int) round($this->distanceEnMetres($latitude, $longitude, (float) $site->latitude, (float) $site->longitude));
 
-            $measured = $sites->map(function ($site) use ($latitude, $longitude) {
-                $rayon = $site->max_distance_meters ?: self::GPS_DEFAULT_RADIUS_METERS;
+            Log::info('[RH-GPS-DEBUG] Pointage GPS attempt', [
+                'emp_id' => $employee->id,
+                'emp_name' => $employee->name,
+                'site_id' => $site->id,
+                'site_name' => $site->name,
+                'site_lat' => $site->latitude,
+                'site_lng' => $site->longitude,
+                'rayon' => $rayon,
+                'user_lat' => $latitude,
+                'user_lng' => $longitude,
+                'accuracy' => $accuracy,
+                'distance' => $distance,
+            ]);
 
-                return [
-                    'site' => $site,
-                    'distance' => (int) round($this->distanceEnMetres($latitude, $longitude, (float) $site->latitude, (float) $site->longitude)),
+            // 6. Vérifier si cette distance respecte le rayon autorisé
+            if ($distance > $rayon) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Vous ne pouvez pas pointer, car vous êtes en dehors du périmètre autorisé par votre entreprise. Veuillez vous rapprocher du site de pointage.',
+                    'distance' => $distance,
                     'rayon' => $rayon,
-                    'precision' => max($rayon, self::GPS_ACCURACY_FLOOR_METERS),
-                ];
-            })->sortBy('distance')->values();
-
-            // Le site le plus proche dont l'employé est dans le rayon, mesuré assez précisément,
-            // avec une marge égale à l'imprécision du GPS (plafonnée)
-            $marge = min($accuracy, self::GPS_TOLERANCE_MAX_METERS);
-            $match = $measured->first(fn ($m) => $m['distance'] <= $m['rayon'] + $marge && $accuracy <= $m['precision']);
-
-            if (!$match) {
-                // Position trop floue pour trancher alors que l'employé est peut-être
-                // sur un site (au portail du bureau…) : il réessaie, au lieu d'envoyer
-                // à son supérieur un pointage qui aurait dû compter tout de suite.
-                $incertain = $measured->first(fn ($m) => $accuracy > $m['precision'] && $m['distance'] - $accuracy <= $m['rayon']);
-
-                if ($incertain) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => '📡 Position pas assez précise pour confirmer votre présence à « ' . $incertain['site']->name . ' » (± ' . $accuracy . ' m, il faut ± ' . $incertain['precision'] . ' m au plus). Restez quelques secondes à découvert, puis réessayez.',
-                        'gps_accuracy' => $accuracy,
-                        'precision_requise' => $incertain['precision'],
-                        'site' => $incertain['site']->name,
-                    ], 422);
-                }
-
-                // Hors de tout site connu (ou aucun site enregistré) : ce n'est pas une
-                // anomalie en soi (visite client, autre site…). Le pointage part en
-                // validation chez le supérieur hiérarchique au lieu d'être refusé.
-                return $this->pointageHorsSite($request, $employee, $latitude, $longitude, $accuracy, $measured->first());
+                    'site' => $site->name,
+                    'gps_accuracy' => $accuracy,
+                ], 422);
             }
 
-            $site = $match['site'];
-            $now = Carbon::now();
-            $pointageType = $request->input('type') ?: $this->determinerTypePointage($employee->id, $now);
-
-            // Retard / départ anticipé selon les horaires de l'emplacement. Au bureau
-            // d'une succursale, les mêmes qu'au scan de son QR code : ceux du service
-            // de l'employé, à défaut ceux du site.
+            // 7. Employé dans le rayon autorisé : évaluation des horaires et enregistrement
             $schedules = app(BranchScheduleResolver::class);
             $horaire = $site->type === 'office' && $site->branch_id
                 ? ($schedules->resolveForEmployee((int) $employee->company_id, (int) $site->branch_id, $employee->department_id) ?? $site)
@@ -3694,16 +3692,12 @@ class ApiAppController extends Controller
                 'auth_time' => $now->toTimeString(),
                 'type' => $pointageType,
                 'direction' => $company->name ?? 'N/A',
-                'name_device' => 'Pointage GPS ' . ($request->device_info['name'] ?? ''),
+                'name_device' => 'Pointage GPS (' . $distance . 'm/' . $rayon . 'm, ±' . $accuracy . 'm)',
                 'no_device' => $user->id,
                 'emp_id' => $employee->id,
                 'card_no' => 'N/A',
                 'name_emp' => $employee->name,
                 'location_id' => $site->id,
-                'latitude' => $latitude,
-                'longitude' => $longitude,
-                'gps_accuracy' => $accuracy,
-                'distance_site' => $match['distance'],
                 'status' => 1,
                 'company_id' => $employee->company_id,
                 'scan_status' => $scanStatus,
@@ -3725,8 +3719,8 @@ class ApiAppController extends Controller
                 'type' => $pointageType,
                 'location_id' => $site->id,
                 'site' => $site->name,
-                'distance' => $match['distance'],
-                'rayon' => $match['rayon'],
+                'distance' => $distance,
+                'rayon' => $rayon,
                 'scan_status' => $scanStatus,
                 'duree_retard' => $dureeRetard,
                 'statut_libelle' => $statutScan['libelle'],
@@ -3746,6 +3740,60 @@ class ApiAppController extends Controller
                 'message' => 'Erreur lors de l\'enregistrement du pointage: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Résout le site de pointage (WorkLocation) auquel un employé est associé.
+     */
+    public function resolveEmployeeWorkLocation(Employee $employee): ?WorkLocation
+    {
+        // 1. Si l'employé est rattaché à une succursale/site
+        if ($employee->branch_id) {
+            // a) Emplacement spécifique au département de l'employé sur cette succursale
+            if ($employee->department_id) {
+                $loc = WorkLocation::where('company_id', $employee->company_id)
+                    ->where('branch_id', $employee->branch_id)
+                    ->where('department_id', $employee->department_id)
+                    ->where('is_active', 1)
+                    ->whereNotNull('latitude')
+                    ->whereNotNull('longitude')
+                    ->first();
+                if ($loc) {
+                    return $loc;
+                }
+            }
+
+            // b) Emplacement par défaut de la succursale (department_id = null)
+            $loc = WorkLocation::where('company_id', $employee->company_id)
+                ->where('branch_id', $employee->branch_id)
+                ->whereNull('department_id')
+                ->where('is_active', 1)
+                ->whereNotNull('latitude')
+                ->whereNotNull('longitude')
+                ->first();
+            if ($loc) {
+                return $loc;
+            }
+
+            // c) Tout autre emplacement actif avec coordonnées GPS pour cette succursale
+            $loc = WorkLocation::where('company_id', $employee->company_id)
+                ->where('branch_id', $employee->branch_id)
+                ->where('is_active', 1)
+                ->whereNotNull('latitude')
+                ->whereNotNull('longitude')
+                ->first();
+            if ($loc) {
+                return $loc;
+            }
+        }
+
+        // 2. Si pas de succursale ou pas d'emplacement sur la succursale :
+        // emplacement actif de l'entreprise avec coordonnées GPS
+        return WorkLocation::where('company_id', $employee->company_id)
+            ->where('is_active', 1)
+            ->whereNotNull('latitude')
+            ->whereNotNull('longitude')
+            ->first();
     }
 
     /**
