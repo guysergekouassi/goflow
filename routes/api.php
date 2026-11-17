@@ -151,4 +151,8 @@ Route::middleware(['jwt.auth'])->group(function () {
 Route::middleware([VerifyHubToken::class])->group(function () {
     Route::get('/companies', [DashboardApiController::class, 'getCompanies']);
     Route::get('/dashboard/kpis', [DashboardApiController::class, 'getKpis']);
+
+    // API d'exportation des présences pour le Sas de Contrôle RHFlow
+    Route::get('/presences/export', [\App\Http\Controllers\Api\AttendanceExportController::class, 'export']);
+    Route::get('/presences/periodes', [\App\Http\Controllers\Api\AttendanceExportController::class, 'getPeriodes']);
 });

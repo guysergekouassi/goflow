@@ -9,6 +9,7 @@ use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Modules\Employees\Models\Demande;
 use Modules\Employees\Models\Employee;
 use Modules\Leaves\Models\Leave;
@@ -31,11 +32,19 @@ use Modules\Time\Models\TimeSheet;
  * Calculées seulement si l'entreprise a paramétré son rythme hebdomadaire
  * (working_days_per_week) ou si la succursale de l'employé a le sien : sans ce
  * réglage, on ne sait pas quels jours l'employé était attendu.
+ *
+ * Heures dues : durée de travail des jours attendus (fériés chômés exclus),
+ * moins les jours d'absence accordée. Ex. 40 h la semaine d'un férié → 32 h.
  */
 class WeeklyAttendanceReport
 {
     private const LEAVE_ACCORDE = ['Approuvé', 'Démarré', 'Terminé'];
     private const DEMANDE_ACCORDEE = ['Approved', 'Approuvé'];
+
+    /** Logo réduit à ce côté (pixels) : affiché en 42 px, net à l'impression. */
+    private const LOGO_COTE_MAX = 240;
+    /** Au-delà, décoder le logo pour le réduire risquerait la mémoire de PHP. */
+    private const LOGO_PIXELS_MAX = 25_000_000;
 
     public function build(Company $company, ?Carbon $reference = null): array
     {
@@ -65,19 +74,29 @@ class WeeklyAttendanceReport
 
         $justifiees = $this->absencesJustifiees($ids, $debut, $fin);
         $joursAttendus = $this->joursAttendusParSite($company, $debut, $fin);
+        $feries = Holiday::datesBetween($company->id, $debut, $fin, false);
+        $duree = $this->dureeTravail($company);
 
         $lignes = [];
         $nonJustifiees = [];
+        $presentsParJour = array_fill_keys($jours, 0);
         $stats = [
             'effectif' => $employes->count(),
             'presents' => 0,
             'jours_presence' => 0,
             'jours_attendus' => 0,
+            'presence_attendue' => 0,
+            'justifiees_attendues' => 0,
             'retards' => 0,
             'minutes_retard' => 0,
             'departs_anticipes' => 0,
             'absences_justifiees' => 0,
             'absences_non_justifiees' => 0,
+            'employes_conge' => 0,
+            'respect_duree' => 0,
+            'repartition' => ['complet' => 0, 'partiel' => 0, 'absent' => 0, 'conge' => 0],
+            'ponctualite' => ['a_l_heure' => 0, 'en_retard' => 0, 'sans_pointage' => 0],
+            'employes_departs_anticipes' => 0,
         ];
 
         foreach ($employes as $employe) {
@@ -85,45 +104,78 @@ class WeeklyAttendanceReport
             $embauche = $employe->company_doj ? Carbon::parse($employe->company_doj)->toDateString() : null;
 
             $detail = [];
-            $totaux = ['presence' => 0, 'retards' => 0, 'minutes_retard' => 0, 'justifiees' => 0, 'non_justifiees' => 0, 'minutes_travail' => 0];
+            $totaux = ['presence' => 0, 'retards' => 0, 'minutes_retard' => 0, 'departs_anticipes' => 0,
+                'justifiees' => 0, 'non_justifiees' => 0, 'minutes_travail' => 0,
+                'jours_attendus' => 0, 'presence_attendue' => 0, 'justifiees_attendues' => 0];
 
             foreach ($jours as $jour) {
                 $ligne = $this->journee($pointages->get($employe->id . '|' . $jour, collect()), $sites);
-                $motif = $justifiees[$employe->id][$jour] ?? null;
+                $ferie = in_array($jour, $feries, true);
+                // Un férié chômé n'est pas une absence, même s'il tombe pendant un congé
+                $motif = $ferie ? null : ($justifiees[$employe->id][$jour] ?? null);
+                $attendu = $controle !== null && in_array($jour, $controle, true) && (!$embauche || $jour >= $embauche);
+
+                $totaux['jours_attendus'] += (int) $attendu;
 
                 if ($ligne) {
+                    $presentsParJour[$jour]++;
                     $totaux['presence']++;
+                    $totaux['presence_attendue'] += (int) $attendu;
                     $totaux['minutes_travail'] += $ligne['minutes_travail'];
                     if ($ligne['retard'] > 0 || $ligne['code_arrivee'] === 'retard') {
                         $totaux['retards']++;
                         $totaux['minutes_retard'] += $ligne['retard'];
                     }
-                    if ($ligne['depart_anticipe']) {
-                        $stats['departs_anticipes']++;
-                    }
+                    $totaux['departs_anticipes'] += (int) $ligne['depart_anticipe'];
                 } elseif ($motif) {
                     $totaux['justifiees']++;
-                } elseif ($controle !== null && in_array($jour, $controle, true) && (!$embauche || $jour >= $embauche)) {
+                    $totaux['justifiees_attendues'] += (int) $attendu;
+                } elseif ($attendu) {
                     $totaux['non_justifiees']++;
                     $nonJustifiees[$employe->id][] = $jour;
                 }
 
-                if ($controle !== null && in_array($jour, $controle, true) && (!$embauche || $jour >= $embauche)) {
-                    $stats['jours_attendus']++;
-                }
-
-                $detail[$jour] = $ligne + ['absence' => $ligne ? null : $motif, 'non_justifiee' => !$ligne && !$motif
-                    && $controle !== null && in_array($jour, $controle, true) && (!$embauche || $jour >= $embauche)];
+                $detail[$jour] = $ligne + [
+                    'absence' => $ligne ? null : $motif,
+                    'ferie' => !$ligne && $ferie,
+                    'non_justifiee' => !$ligne && !$motif && $attendu,
+                ];
             }
+
+            // Fériés chômés déjà exclus des jours attendus ; on retire les absences accordées
+            $minutesDues = $controle !== null
+                ? ($totaux['jours_attendus'] - $totaux['justifiees_attendues']) * $duree['jour']
+                : null;
+
+            $categorie = match (true) {
+                $totaux['presence'] > 0 && $totaux['non_justifiees'] === 0 => 'complet',
+                $totaux['presence'] > 0 => 'partiel',
+                $totaux['justifiees'] > 0 && $totaux['non_justifiees'] === 0 => 'conge',
+                default => 'absent',
+            };
+            $ponctualite = match (true) {
+                $totaux['presence'] === 0 => 'sans_pointage',
+                $totaux['retards'] > 0 => 'en_retard',
+                default => 'a_l_heure',
+            };
 
             if ($totaux['presence'] > 0) {
                 $stats['presents']++;
             }
             $stats['jours_presence'] += $totaux['presence'];
+            $stats['jours_attendus'] += $totaux['jours_attendus'];
+            $stats['presence_attendue'] += $totaux['presence_attendue'];
+            $stats['justifiees_attendues'] += $totaux['justifiees_attendues'];
             $stats['retards'] += $totaux['retards'];
             $stats['minutes_retard'] += $totaux['minutes_retard'];
+            $stats['departs_anticipes'] += $totaux['departs_anticipes'];
             $stats['absences_justifiees'] += $totaux['justifiees'];
             $stats['absences_non_justifiees'] += $totaux['non_justifiees'];
+            $stats['employes_conge'] += (int) ($totaux['justifiees'] > 0);
+            $stats['respect_duree'] += (int) ($minutesDues > 0 && $totaux['minutes_travail'] >= $minutesDues);
+            $stats['employes_departs_anticipes'] += (int) ($totaux['departs_anticipes'] > 0);
+            $stats['repartition'][$categorie]++;
+            $stats['ponctualite'][$ponctualite]++;
 
             $lignes[] = [
                 'employe' => $employe,
@@ -131,22 +183,30 @@ class WeeklyAttendanceReport
                 'departement' => $departements[$employe->department_id] ?? '—',
                 'jours' => $detail,
                 'totaux' => $totaux,
+                'minutes_dues' => $minutesDues,
                 'controle_absences' => $controle !== null,
             ];
         }
 
         $controleActif = collect($lignes)->contains(fn ($l) => $l['controle_absences']);
-        $stats['taux_presence'] = $controleActif && $stats['jours_attendus'] > 0
-            ? round(min(100, $stats['jours_presence'] / $stats['jours_attendus'] * 100), 1)
+        // Hors congés et absences accordées : un employé en congé n'était pas attendu
+        $joursDus = $stats['jours_attendus'] - $stats['justifiees_attendues'];
+        $stats['taux_presence'] = $controleActif && $joursDus > 0
+            ? round(min(100, $stats['presence_attendue'] / $joursDus * 100), 1)
             : null;
 
         $noms = $employes->pluck('name', 'id');
 
         return [
             'company' => $company,
+            'logo' => $this->logo($company),
             'debut' => $debut,
             'fin' => $fin,
             'jours' => $jours,
+            'feries' => $feries,
+            'duree_travail' => $duree,
+            'calendrier' => $this->calendrierSemaine($company, $jours, $feries),
+            'presents_par_jour' => $presentsParJour,
             'genere_le' => Carbon::now(),
             'controle_absences' => $controleActif,
             'stats' => $stats,
@@ -164,12 +224,12 @@ class WeeklyAttendanceReport
     }
 
     /**
-     * PDF du rapport (A4 paysage), sous forme de contenu binaire.
+     * PDF du rapport (A4 portrait), sous forme de contenu binaire.
      */
     public function pdf(array $rapport): string
     {
         return Pdf::loadView('reports.weekly-attendance-pdf', $rapport)
-            ->setPaper('a4', 'landscape')
+            ->setPaper('a4', 'portrait')
             ->setOption('isFontSubsettingEnabled', true) // pièce jointe légère : seuls les glyphes utilisés
             ->output();
     }
@@ -212,6 +272,81 @@ class WeeklyAttendanceReport
             'lieu' => $reference->location_id ? ($sites[$reference->location_id] ?? '—') : '—',
             'mode' => str_starts_with((string) $reference->name_device, 'Pointage GPS') ? 'GPS' : 'QR',
         ];
+    }
+
+    /**
+     * Durée de travail de référence de l'entreprise, en minutes par jour et par
+     * semaine. Sans réglage : 8 h par jour (comme les absences du mobile), sur 5 jours.
+     *
+     * @return array{jour: int, semaine: int}
+     */
+    private function dureeTravail(Company $company): array
+    {
+        $parJour = $company->getDailyWorkingHours() ?: AbsenceService::HEURES_PAR_JOUR;
+        $parSemaine = (float) $company->working_hours_per_week ?: $parJour * ((int) $company->working_days_per_week ?: 5);
+
+        return ['jour' => (int) round($parJour * 60), 'semaine' => (int) round($parSemaine * 60)];
+    }
+
+    /**
+     * Jours ouvrés de la période selon le rythme de l'entreprise (lundi → vendredi
+     * sans réglage), fériés chômés à part.
+     *
+     * @return array{jours_ouvres: int, jours_feries: int, rythme: string}
+     */
+    private function calendrierSemaine(Company $company, array $jours, array $feries): array
+    {
+        $parametre = (int) $company->working_days_per_week > 0;
+        $semaine = $parametre ? $company->workingDays() : [1, 2, 3, 4, 5];
+        $ouvres = array_filter($jours, fn ($j) => in_array(Carbon::parse($j)->dayOfWeekIso, $semaine, true));
+        $feriesOuvres = array_intersect($ouvres, $feries);
+
+        $noms = [1 => 'lundi', 2 => 'mardi', 3 => 'mercredi', 4 => 'jeudi', 5 => 'vendredi', 6 => 'samedi', 7 => 'dimanche'];
+
+        return [
+            'jours_ouvres' => count($ouvres) - count($feriesOuvres),
+            'jours_feries' => count($feriesOuvres),
+            'rythme' => count($semaine) === 7 ? 'tous les jours' : $noms[min($semaine)] . ' → ' . $noms[max($semaine)],
+        ];
+    }
+
+    /**
+     * Logo de l'entreprise en data URI, réduit : dompdf ne charge pas d'image
+     * distante, et un logo de plusieurs mégapixels (jusqu'à 4080×2500 en base)
+     * lui fait dépasser la mémoire de PHP. Sans logo exploitable : null.
+     */
+    private function logo(Company $company): ?string
+    {
+        $chemin = 'logos/' . $company->logo;
+        if (!$company->logo || filter_var($company->logo, FILTER_VALIDATE_URL) || !Storage::disk('public')->exists($chemin)) {
+            return null;
+        }
+
+        $contenu = Storage::disk('public')->get($chemin);
+        $infos = @getimagesizefromstring($contenu);
+        // Illisible (SVG, fichier abîmé…) ou trop grand pour être décodé sans risque
+        if (!$infos || $infos[0] * $infos[1] > self::LOGO_PIXELS_MAX || !($source = @imagecreatefromstring($contenu))) {
+            return null;
+        }
+
+        $echelle = min(1, self::LOGO_COTE_MAX / max($infos[0], $infos[1]));
+        $largeur = max(1, (int) round($infos[0] * $echelle));
+        $hauteur = max(1, (int) round($infos[1] * $echelle));
+
+        // Fond transparent conservé
+        $logo = imagecreatetruecolor($largeur, $hauteur);
+        imagealphablending($logo, false);
+        imagesavealpha($logo, true);
+        imagefill($logo, 0, 0, imagecolorallocatealpha($logo, 255, 255, 255, 127));
+        imagecopyresampled($logo, $source, 0, 0, 0, 0, $largeur, $hauteur, $infos[0], $infos[1]);
+
+        ob_start();
+        imagepng($logo);
+        $png = ob_get_clean();
+        imagedestroy($source);
+        imagedestroy($logo);
+
+        return 'data:image/png;base64,' . base64_encode($png);
     }
 
     /**

@@ -27,6 +27,7 @@ use Illuminate\Support\Str;
 
 use Illuminate\Validation\Rule;
 use Carbon\Carbon;
+use Carbon\CarbonPeriod;
 use App\Models\User;
 use App\Models\Notification;
 
@@ -74,6 +75,7 @@ use Modules\Loans\Models\LoanOption;
 use Modules\Time\Models\TimeSheet;
 use Modules\Time\Models\Overtime;
 use Modules\Time\Models\Pointeuse;
+use Modules\Time\Models\Holiday;
 use Modules\Loans\Services\LoanCalculatorService;
 use Illuminate\Support\Facades\Validator;
 use Modules\Settings\Models\WorkLocation;
@@ -90,6 +92,15 @@ use Illuminate\Support\Facades\RateLimiter;
 
 class ApiAppController extends Controller
 {
+    /**
+     * Pièces jointes acceptées pour une demande. Le fichier est déposé dans le
+     * dossier public : une extension libre (.php…) le rendrait exécutable.
+     */
+    private const EXTENSIONS_PIECE_JOINTE = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif'];
+
+    /** Statuts d'un congé accordé (l'absence a lieu ou a eu lieu). */
+    private const CONGE_ACCORDE = ['Approuvé', 'Approved', 'Démarré', 'Terminé'];
+
     /** Pointage GPS : au-delà de cette imprécision (mètres), la position n'est pas fiable. */
     private const GPS_MAX_ACCURACY_METERS = 100;
 
@@ -756,6 +767,23 @@ class ApiAppController extends Controller
                 'logoBase64.filename' => 'nullable|string',
             ]);
 
+            // Photo contrôlée avant toute écriture : seules de vraies images JPEG/PNG/GIF
+            // sont acceptées (le type annoncé par l'application n'est pas fiable)
+            $avatarContenu = null;
+            $avatarExtension = null;
+            if (!empty($request->input('logoBase64.data'))) {
+                $contenu = base64_decode($request->input('logoBase64.data'), true);
+                $infosImage = $contenu !== false ? @getimagesizefromstring($contenu) : false;
+                $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif'];
+
+                if (!$infosImage || !isset($extensions[$infosImage['mime']])) {
+                    return response()->json(['error' => 'La photo doit être une image JPEG, PNG ou GIF.'], 422);
+                }
+
+                $avatarContenu = $contenu;
+                $avatarExtension = $extensions[$infosImage['mime']];
+            }
+
             $emp = Employee::where('user_id', '=', $id)->first();
             $emp->name = $request->name;
             $emp->email = $request->email;
@@ -769,24 +797,16 @@ class ApiAppController extends Controller
             }
             $user->email = $request->email;
 
-            // Traitement de l'image en base64 si fournie
-            if ($request->has('logoBase64.data') && !empty($request->input('logoBase64.data'))) {
-                $imageData = $request->input('logoBase64.data');
-                $mimeType = $request->input('logoBase64.mimeType');
-                $filename = $request->input('logoBase64.filename');
-
+            // Traitement de l'image en base64 si fournie (contrôlée plus haut)
+            if ($avatarContenu !== null) {
                 // Générer un nom de fichier unique
-                $fileName = time() . '_' . pathinfo($filename, PATHINFO_FILENAME) . '.' . $this->getExtensionFromMimeType($mimeType);
+                $fileName = time() . '_' . (Str::slug(pathinfo((string) $request->input('logoBase64.filename'), PATHINFO_FILENAME)) ?: 'avatar') . '.' . $avatarExtension;
 
-                // Créer le dossier s'il n'existe pas
-                $uploadPath = storage_path('uploads/avatar');
-                if (!file_exists($uploadPath)) {
-                    mkdir($uploadPath, 0755, true);
-                }
-
-                // Sauvegarder l'image décodée
-                $imagePath = $uploadPath . '/' . $fileName;
-                file_put_contents($imagePath, base64_decode($imageData));
+                // Directement dans public/storage/avatars, comme les photos et logos du site
+                // web (cf. User::avatarUrl) : sur le serveur, public/storage n'est pas relié à
+                // storage/app/public, une photo enregistrée sur le disque « public » ne
+                // s'afficherait jamais.
+                $this->enregistrerFichierPublic('avatars/' . $fileName, $avatarContenu);
 
                 // Mettre à jour le chemin dans la base de données
                 $user->avatar = $fileName;
@@ -809,19 +829,6 @@ class ApiAppController extends Controller
                 'message' => $e->getMessage()
             ], 400);
         }
-    }
-
-    // Ajouter cette fonction utilitaire à votre contrôleur
-    private function getExtensionFromMimeType($mimeType)
-    {
-        $extensions = [
-            'image/jpeg' => 'jpg',
-            'image/png' => 'png',
-            'image/gif' => 'gif',
-            'image/svg+xml' => 'svg',
-        ];
-
-        return $extensions[$mimeType] ?? 'jpg';
     }
 
     public function dashboardCompany(Request $request, $id)
@@ -1341,6 +1348,16 @@ class ApiAppController extends Controller
                 ];
             }
 
+            // Heures attendues jour par jour sur la période, pour le bilan de chaque
+            // semaine. Un échec de ce calcul ne doit pas priver l'employé de ses pointages.
+            $company = Company::find($employee->company_id);
+            try {
+                $calendrier = $this->heuresAttenduesParJour($employee, $company, Carbon::parse($startDate), Carbon::parse($endDate));
+            } catch (\Throwable $e) {
+                \Log::error('Bilan hebdomadaire des pointages : ' . $e->getMessage());
+                $calendrier = null;
+            }
+
             // 5. Transformation en tableaux indexés
             $resultatFinal = [];
             foreach ($resultat as $mois) {
@@ -1354,13 +1371,15 @@ class ApiAppController extends Controller
                         'numero_semaine' => $semaine['numero_semaine'],
                         'jours' => array_values($semaine['jours'])
                     ];
+                    if ($calendrier !== null) {
+                        $semaineData['bilan'] = $this->bilanSemaine($calendrier, (string) array_key_first($semaine['jours']));
+                    }
                     $moisData['semaines'][] = $semaineData;
                 }
                 $resultatFinal[] = $moisData;
             }
 
             // 6. Horaires de bureau
-            $company = Company::find($employee->company_id);
             $officeTime = [
                 'startTime' => $company->company_start_time ?? ($company->settings['company_start_time'] ?? '08:00'),
                 'endTime' => $company->company_end_time ?? ($company->settings['company_end_time'] ?? '17:00'),
@@ -1377,6 +1396,131 @@ class ApiAppController extends Controller
                 'error' => 'Erreur lors de la récupération des pointages: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Heures attendues de l'employé, par jour ouvré (Y-m-d) de la période : le
+     * rythme hebdomadaire de son site (à défaut celui de l'entreprise), avec la
+     * part tombant sur un férié chômé ou une absence accordée.
+     *
+     * @return array<string, array{prevues: float, ferie: float, conge: float}>
+     */
+    private function heuresAttenduesParJour(Employee $employee, Company $company, Carbon $debut, Carbon $fin): array
+    {
+        $parJour = $company->getDailyWorkingHours() ?: AbsenceService::HEURES_PAR_JOUR;
+        $site = $employee->branch_id ? Branch::find($employee->branch_id) : null;
+        $chomes = Holiday::datesBetween($company->id, $debut, $fin, false);
+        $travailles = Holiday::datesBetween($company->id, $debut, $fin, true);
+        $absences = $this->heuresAbsenceParJour($employee, $debut, $fin, $parJour);
+
+        $jours = [];
+        foreach (CarbonPeriod::create($debut, $fin) as $jour) {
+            $cle = $jour->toDateString();
+            $ouvre = in_array($cle, $travailles, true) || ($site ? $site->worksOn($jour) : $company->worksOn($jour));
+            if (!$ouvre) {
+                continue;
+            }
+
+            $ferie = in_array($cle, $chomes, true) ? $parJour : 0;
+            $jours[$cle] = [
+                'prevues' => $parJour,
+                'ferie' => $ferie,
+                // Un férié chômé n'est pas décompté une seconde fois en congé
+                'conge' => $ferie ? 0 : min($absences[$cle] ?? 0, $parJour),
+            ];
+        }
+
+        return $jours;
+    }
+
+    /**
+     * Heures d'absence accordées par jour (Y-m-d) : congés et demandes d'absence
+     * approuvés, et absences approuvées de time_sheets (là où les validations du
+     * web les inscrivent). Une absence d'un seul jour peut n'en couvrir qu'une partie.
+     *
+     * @return array<string, float>
+     */
+    private function heuresAbsenceParJour(Employee $employee, Carbon $debut, Carbon $fin, float $parJour): array
+    {
+        $heures = [];
+        $ajouter = function ($du, $au, float $heuresDuJour) use (&$heures, $debut, $fin) {
+            $premier = Carbon::parse($du)->startOfDay();
+            $dernier = $au ? Carbon::parse($au)->startOfDay() : $premier->copy();
+            $premier = $premier->max($debut);
+            $dernier = $dernier->min($fin);
+
+            foreach ($dernier->gte($premier) ? CarbonPeriod::create($premier, $dernier) : [] as $jour) {
+                $cle = $jour->toDateString();
+                $heures[$cle] = max($heures[$cle] ?? 0, $heuresDuJour);
+            }
+        };
+
+        Leave::where('employee_id', $employee->id)
+            ->whereIn('status', self::CONGE_ACCORDE)
+            ->whereNull('deleted_at')
+            ->whereDate('start_date', '<=', $fin)
+            ->whereDate('end_date', '>=', $debut)
+            ->get()
+            ->each(fn ($conge) => $ajouter($conge->start_date, $conge->end_date, $parJour));
+
+        Demande::where('employee_id', $employee->id)
+            ->where('categorie_demandes', 'absence')
+            ->whereIn('status', self::CONGE_ACCORDE)
+            ->whereNull('deleted_at')
+            ->whereNotNull('start_date')
+            ->whereDate('start_date', '<=', $fin)
+            ->where(fn ($q) => $q->whereDate('end_date', '>=', $debut)
+                ->orWhere(fn ($q) => $q->whereNull('end_date')->whereDate('start_date', '>=', $debut)))
+            ->get()
+            ->each(fn ($demande) => $ajouter($demande->start_date, $demande->end_date, $parJour));
+
+        TimeSheet::where('employee_id', $employee->id)
+            ->where('statut', 'approved')
+            ->whereDate('date', '<=', $fin)
+            ->where(fn ($q) => $q->whereDate('arrival_date', '>=', $debut)
+                ->orWhere(fn ($q) => $q->whereNull('arrival_date')->whereDate('date', '>=', $debut)))
+            ->get()
+            ->each(function ($absence) use ($ajouter, $parJour) {
+                $unSeulJour = !$absence->arrival_date
+                    || Carbon::parse($absence->arrival_date)->isSameDay(Carbon::parse($absence->date));
+                $heuresDuJour = $unSeulJour && (float) $absence->hours > 0 ? min((float) $absence->hours, $parJour) : $parJour;
+                $ajouter($absence->date, $absence->arrival_date, $heuresDuJour);
+            });
+
+        return $heures;
+    }
+
+    /**
+     * Bilan d'une semaine de pointage, limitée au mois où elle est affichée :
+     * heures attendues = heures prévues - congés - fériés (« 35h / 40h », ou
+     * « 25h / 32h » avec un férié). La durée travaillée, elle, est calculée par
+     * l'application à partir des pointages de la semaine.
+     *
+     * @param  array<string, array{prevues: float, ferie: float, conge: float}>  $calendrier
+     * @param  string  $unJour  un jour de la semaine (Y-m-d)
+     */
+    private function bilanSemaine(array $calendrier, string $unJour): array
+    {
+        $jour = Carbon::parse($unJour);
+        $debut = $jour->copy()->startOfWeek(Carbon::MONDAY)->max($jour->copy()->startOfMonth());
+        $fin = $jour->copy()->endOfWeek(Carbon::SUNDAY)->startOfDay()->min($jour->copy()->endOfMonth()->startOfDay());
+
+        $prevues = $conge = $ferie = 0;
+        foreach (CarbonPeriod::create($debut, $fin) as $date) {
+            $heures = $calendrier[$date->toDateString()] ?? null;
+            if ($heures) {
+                $prevues += $heures['prevues'];
+                $conge += $heures['conge'];
+                $ferie += $heures['ferie'];
+            }
+        }
+
+        return [
+            'heures_prevues' => round($prevues, 2),
+            'heures_conge' => round($conge, 2),
+            'heures_ferie' => round($ferie, 2),
+            'heures_attendues' => round(max(0, $prevues - $conge - $ferie), 2),
+        ];
     }
 
     public function documentsEmployee(Request $request)
@@ -1611,6 +1755,11 @@ class ApiAppController extends Controller
             $data['duree_retard']   = $statut['duree_minutes'];
             $data['statut_couleur'] = $statut['couleur'];
 
+            // Arrivée et départ du jour, pour le résumé de l'accueil (durée de travail)
+            $duJour = Pointeuse::where('emp_id', $employee->id)->whereDate('auth_date', now())->orderBy('auth_time')->get();
+            $data['heure_entree'] = $duJour->firstWhere('type', 'entree')?->auth_time;
+            $data['heure_sortie'] = $duJour->where('type', 'sortie')->last()?->auth_time;
+
             return response()->json($data);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Utilisateur non connecté.'], 401);
@@ -1621,10 +1770,11 @@ class ApiAppController extends Controller
      * Résumé « Absence » du mobile : absences approuvées de l'employé sur le
      * mois en cours, lues dans time_sheets comme les rapports de présence et la paie.
      *
-     * Une absence se mesure en heures (8 h = 1 jour, comme le formulaire du
-     * web) : le total est renvoyé en jours entiers + heures restantes, pour
-     * l'affichage « 2 jours et 3 heures ». Une absence à cheval sur deux mois
-     * ne compte que pour sa part dans le mois en cours.
+     * Seuls les jours déjà écoulés comptent : une absence accordée pour la
+     * semaine prochaine n'a pas encore eu lieu. Une absence de plusieurs jours
+     * compte en journées entières, comme sur la liste des demandes ; une
+     * absence d'un jour compte ses heures (8 h = 1 jour). Le total est renvoyé
+     * en jours entiers + heures restantes, pour l'affichage « 2 jours et 3 heures ».
      */
     public function CountHeuresAbsence(Request $request)
     {
@@ -1633,11 +1783,11 @@ class ApiAppController extends Controller
             $employee = Employee::where('user_id', $user->id)->first();
 
             $debutMois = now()->startOfMonth();
-            $finMois = now()->endOfMonth()->startOfDay();
+            $aujourdhui = now()->startOfDay();
 
             $absences = TimeSheet::where('employee_id', $employee->id)
                 ->where('statut', 'approved')
-                ->whereDate('date', '<=', $finMois)
+                ->whereDate('date', '<=', $aujourdhui)
                 ->where(function ($q) use ($debutMois) {
                     $q->whereDate('arrival_date', '>=', $debutMois)
                         ->orWhere(fn ($q) => $q->whereNull('arrival_date')->whereDate('date', '>=', $debutMois));
@@ -1650,17 +1800,22 @@ class ApiAppController extends Controller
                 $debut = Carbon::parse($absence->date)->startOfDay();
                 $fin = Carbon::parse($absence->arrival_date ?: $absence->date)->startOfDay();
                 $joursTotal = (int) round($debut->diffInDays($fin)) + 1;
-                $joursDansMois = (int) round($debut->max($debutMois)->diffInDays($fin->min($finMois))) + 1;
+                $joursEcoules = (int) round($debut->max($debutMois)->diffInDays($fin->min($aujourdhui))) + 1;
+
+                if ($joursTotal > 1) {
+                    $heures += $joursEcoules * AbsenceService::HEURES_PAR_JOUR;
+                    continue;
+                }
 
                 // Heures saisies ; à défaut (anciennes lignes enregistrées à 0 h), la durée de l'absence
                 $heuresAbsence = (float) $absence->hours > 0
                     ? (float) $absence->hours
-                    : ((float) $absence->retenue > 0 ? (float) $absence->retenue : $joursTotal) * AbsenceService::HEURES_PAR_JOUR;
+                    : ((float) $absence->retenue > 0 ? (float) $absence->retenue : 1) * AbsenceService::HEURES_PAR_JOUR;
 
-                $heures += $heuresAbsence * $joursDansMois / $joursTotal;
+                $heures += min($heuresAbsence, AbsenceService::HEURES_PAR_JOUR);
             }
 
-            // Arrondi avant le découpage : 15,9999 h (prorata) doit donner 2 jours, pas 1 jour et 8 h
+            // Arrondi avant le découpage : 15,9999 h (heures décimales) doit donner 2 jours, pas 1 jour et 8 h
             $heures = round($heures, 1);
             $jours = (int) floor($heures / AbsenceService::HEURES_PAR_JOUR);
 
@@ -1778,28 +1933,36 @@ class ApiAppController extends Controller
         // l'approbation si une période existe à ce moment-là.
         $periode = $this->resolvePaiePeriode($employee->company_id, $request->start_date);
 
-        // Gestion du fichier joint (base64)
-        $filePath = null;
+        // Fichier joint (base64), contrôlé avant tout enregistrement
+        $fileData = null;
+        $extension = null;
         if ($request->has('document_data') && !empty($request->document_data)) {
-            try {
-                $extension = 'jpg';
-                if ($request->has('document_name')) {
-                    $extension = pathinfo($request->document_name, PATHINFO_EXTENSION) ?: 'jpg';
-                }
-
-                $fileName = 'req_' . time() . '_' . rand(100, 999) . '.' . $extension;
-                $storageDir = 'demandes';
-                $fullPath = $storageDir . '/' . $fileName;
-
-                $fileData = base64_decode($request->document_data);
-                Storage::disk('public')->put($fullPath, $fileData);
-                $filePath = 'storage/' . $fullPath;
-            } catch (\Exception $e) {
-                Log::error('Erreur upload base64: ' . $e->getMessage());
+            $extension = strtolower(pathinfo((string) $request->input('document_name'), PATHINFO_EXTENSION)) ?: 'jpg';
+            if (!in_array($extension, self::EXTENSIONS_PIECE_JOINTE, true)) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Pièce jointe non acceptée : envoyez un PDF ou une image.',
+                ], 422);
             }
+            $fileData = base64_decode($request->document_data);
         }
 
         $category = $request->input('categorie_demandes', 'absence');
+
+        // Nom imprévisible : le dossier public est accessible à qui connaît l'adresse
+        $enregistrerPieceJointe = function (string $prefixe) use ($fileData, $extension): ?string {
+            if (!$fileData) {
+                return null;
+            }
+            try {
+                $fullPath = 'demandes/' . $prefixe . '_' . Str::random(24) . '.' . $extension;
+                $this->enregistrerFichierPublic($fullPath, $fileData);
+                return 'storage/' . $fullPath;
+            } catch (\Exception $e) {
+                Log::error('Erreur upload base64: ' . $e->getMessage());
+                return null;
+            }
+        };
 
         if ($category === 'pret' || $category === 'autre') {
             // Sauvegarder dans la table `demandes`
@@ -1814,7 +1977,7 @@ class ApiAppController extends Controller
             $demande->demande_reason = $request->leave_reason;
             $demande->status = 'Pending';
             $demande->company_id = $employee->company_id;
-            $demande->file_path = $filePath;
+            $demande->file_path = $enregistrerPieceJointe('req_' . time());
             $demande->save();
 
             return response()->json([
@@ -1845,9 +2008,11 @@ class ApiAppController extends Controller
             $leave->status = 'Pending';
             $leave->leave_statut = 1;
             $leave->company_id = $employee->company_id;
-            // Note: La table leaves n'a peut-être pas de champ file_path d'origine,
-            // on pourrait la rajouter ou utiliser une table pivot si nécessaire.
             $leave->save();
+
+            // La table leaves n'a pas de colonne pour le justificatif : il est retrouvé
+            // par son nom de fichier (cf. pieceJointeAbsence)
+            $enregistrerPieceJointe('absence_' . $leave->id);
 
             return response()->json([
                 'status' => true,
@@ -1970,6 +2135,9 @@ class ApiAppController extends Controller
                 ->map(function ($item) {
                     $item->categorie_id = $item->categorie_demandes; // Aliasing pour le frontend
                     $item->demande_type_id = $item->demande_types; // Aliasing pour le frontend
+                    // Table d'origine, pour la suppression (DELETE leave/{id}?source=demande)
+                    $item->source = 'demande';
+                    $item->document_url = $this->adressePieceJointe($item->file_path);
                     return $item;
                 });
 
@@ -1983,6 +2151,8 @@ class ApiAppController extends Controller
                     $item->categorie_id = 'absence';
                     $item->demande_type_id = $item->leave_type_id;
                     $item->demande_reason = $item->leave_reason;
+                    $item->source = 'leave';
+                    $item->document_url = $this->adressePieceJointe($this->pieceJointeAbsence($item->id));
                     return $item;
                 });
 
@@ -1996,6 +2166,97 @@ class ApiAppController extends Controller
         } catch (\Exception $e) {
             return response()->json(['error' => 'Utilisateur non connecté.'], 401);
         }
+    }
+
+    /**
+     * Justificatif d'une demande d'absence de l'application : la table leaves
+     * n'ayant pas de colonne pour lui, il est enregistré sous
+     * demandes/absence_{id}_… sur le disque public (cf. createLeaveRequest).
+     *
+     * @return string|null chemin public (storage/…)
+     */
+    private function pieceJointeAbsence($leaveId): ?string
+    {
+        $fichiers = glob(public_path('storage/demandes/absence_' . (int) $leaveId . '_*')) ?: [];
+
+        return $fichiers ? 'storage/demandes/' . basename($fichiers[0]) : null;
+    }
+
+    /**
+     * Enregistre un fichier servi tel quel par le site, sous public/storage/{chemin},
+     * comme les logos et photos du web (SettingsController, SuperAdminController) :
+     * public/storage n'est pas un lien vers storage/app/public sur le serveur.
+     */
+    private function enregistrerFichierPublic(string $chemin, string $contenu): void
+    {
+        $destination = public_path('storage/' . $chemin);
+        if (!is_dir(dirname($destination))) {
+            mkdir(dirname($destination), 0755, true);
+        }
+        if (file_put_contents($destination, $contenu) === false) {
+            throw new \RuntimeException('Écriture impossible : ' . $chemin);
+        }
+    }
+
+    /**
+     * Adresse complète d'une pièce jointe, quel que soit le format enregistré :
+     * « storage/demandes/… » (application), « justificatifs/… » (disque public).
+     */
+    private function adressePieceJointe(?string $chemin): ?string
+    {
+        if (!$chemin) {
+            return null;
+        }
+
+        if (preg_match('#^https?://#', $chemin)) {
+            return $chemin;
+        }
+
+        return asset(str_starts_with($chemin, 'storage/') ? $chemin : 'storage/' . ltrim($chemin, '/'));
+    }
+
+    /**
+     * Suppression par l'employé d'une de ses demandes encore en attente
+     * (DELETE leave/{id} ; ?source=demande pour une demande de la table demandes).
+     * Une demande déjà traitée est conservée : elle a pu être reportée en paie.
+     */
+    public function destroy(Request $request, $id = null)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            $employee = Employee::where('user_id', $user->id)->first();
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Utilisateur non connecté.'], 401);
+        }
+
+        if (!$employee) {
+            return response()->json(['status' => false, 'message' => 'Employé non trouvé.'], 404);
+        }
+
+        $demande = $request->query('source') === 'demande'
+            ? Demande::where('employee_id', $employee->id)->find($id)
+            : Leave::where('employee_id', $employee->id)->find($id);
+
+        if (!$demande) {
+            return response()->json(['status' => false, 'message' => 'Demande introuvable.'], 404);
+        }
+
+        if ($demande->status !== 'Pending') {
+            return response()->json([
+                'status' => false,
+                'message' => 'Seule une demande en attente peut être supprimée.',
+            ], 422);
+        }
+
+        $pieceJointe = $demande instanceof Leave ? $this->pieceJointeAbsence($demande->id) : $demande->file_path;
+        $demande->delete();
+
+        // Seuls les justificatifs déposés par l'application sont supprimés avec la demande
+        if ($pieceJointe && str_starts_with($pieceJointe, 'storage/demandes/') && is_file(public_path($pieceJointe))) {
+            unlink(public_path($pieceJointe));
+        }
+
+        return response()->json(['status' => true, 'message' => 'Demande supprimée.']);
     }
 
     public function storeTimeSheetBase64(Request $request)

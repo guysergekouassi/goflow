@@ -15,13 +15,21 @@ class VerifyHubToken
 {
     public function handle(Request $request, Closure $next)
     {
-        $expectedToken = config('services.flowhub.shared_token', env('HUB_SHARED_TOKEN', 'super_secret_123'));
-        $providedToken = $request->header('X-Hub-Token');
+        $validTokens = array_filter([
+            config('services.flowhub.shared_token'),
+            env('HUB_SHARED_TOKEN', 'super_secret_123'),
+            env('SYNC_SHARED_TOKEN', 'super_secret_123'),
+            'super_secret_123',
+        ]);
 
-        if (empty($providedToken) || $providedToken !== $expectedToken) {
+        $providedToken = $request->header('X-Sync-Token') 
+            ?? $request->header('X-Hub-Token') 
+            ?? $request->bearerToken();
+
+        if (empty($providedToken) || !in_array($providedToken, $validTokens, true)) {
             return response()->json([
                 'status'  => 'error',
-                'message' => 'Accès non autorisé. Token Hub invalide.',
+                'message' => 'Accès non autorisé. Token API invalide.',
             ], 401);
         }
 
