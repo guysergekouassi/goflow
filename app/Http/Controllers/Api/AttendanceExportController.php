@@ -193,6 +193,7 @@ class AttendanceExportController extends Controller
                 'employee_id'                 => $empId,
                 'matricule'                   => $emp ? ($emp->matricule ?? $emp->id) : (string)$empId,
                 'nom'                         => $emp ? ($emp->name ?? trim(($emp->first_name ?? '') . ' ' . ($emp->last_name ?? ''))) : "Employé #{$empId}",
+                'email'                       => $emp ? ($emp->email ?? optional($emp->user)->email) : null,
                 'total_pointages'             => $empPointeuses->count(),
                 'jours_pointes'               => $joursPointes,
                 'retards_count'               => $retardsCount,
