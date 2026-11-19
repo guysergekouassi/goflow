@@ -25,6 +25,10 @@ Route::get('/maintenance', function () {
 
 // Routes des notifications (accessibles à tous les utilisateurs authentifiés)
 Route::middleware(['auth'])->group(function () {
+    // Première connexion avec un mot de passe provisoire : choix du mot de passe personnel
+    Route::get('/mot-de-passe/provisoire', [\App\Http\Controllers\Auth\MotDePasseProvisoireController::class, 'show'])->name('mot-de-passe.provisoire');
+    Route::post('/mot-de-passe/provisoire', [\App\Http\Controllers\Auth\MotDePasseProvisoireController::class, 'update'])->name('mot-de-passe.provisoire.enregistrer');
+
     // Récapitulatifs des accès ouverts depuis RHFlow (super-admin, responsables de la société)
     Route::get('/acces-gpflow', [\App\Http\Controllers\LotAccesController::class, 'index'])->name('acces-gpflow.index');
     Route::get('/acces-gpflow/{lot}/telecharger', [\App\Http\Controllers\LotAccesController::class, 'telecharger'])->name('acces-gpflow.telecharger');

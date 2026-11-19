@@ -458,6 +458,8 @@ class EmployeesController extends Controller
                 'email_verified_at' => now(),
                 'created_by' => auth()->user()->id,
             ]);
+            // Mot de passe donné par le RH : le salarié choisit le sien à la première connexion
+            $user->forceFill(['must_change_password' => true])->save();
 
             // Gestion des documents
             $documents = [];
@@ -963,11 +965,12 @@ class EmployeesController extends Controller
                         ?: app(\App\Services\IdentifiantService::class)->identifiantDepuisNom($validated['name']),
                 ]);
 
-                // Mise à jour du mot de passe si fourni
+                // Mise à jour du mot de passe si fourni : fixé par le RH, donc provisoire
                 if (!empty($validated['password'])) {
-                    $user->update([
+                    $user->forceFill([
                         'password' => Hash::make($validated['password']),
-                    ]);
+                        'must_change_password' => true,
+                    ])->save();
                 }
             }
 

@@ -417,6 +417,17 @@ class ApiAppController extends Controller
                 ], 401);
             }
 
+            // Compte désactivé (ou fiche salarié désactivée : départ) : pas de connexion
+            $motifBlocage = \App\Support\EtatCompte::motifBlocage($user);
+            if ($motifBlocage) {
+                Auth::logout();
+
+                return response()->json([
+                    'status' => false,
+                    'message' => $motifBlocage,
+                ], 403);
+            }
+
             // ✅ Authentification réussie - Générer le token JWT
             $token = JWTAuth::fromUser($user);
 
@@ -448,7 +459,10 @@ class ApiAppController extends Controller
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
-                    'username' => $user->username
+                    'username' => $user->username,
+                    'type' => $user->type,
+                    // Mot de passe provisoire : l'application ouvre d'abord le choix du mot de passe
+                    'must_change_password' => \App\Support\EtatCompte::motDePasseAChanger($user),
                 ]
             ], 200);
 
@@ -553,7 +567,8 @@ class ApiAppController extends Controller
 
         $user = User::find($payload['sub']);
 
-        if (!$user || (int) ($user->is_active ?? 1) === 0) {
+        // Compte ou fiche salarié désactivés : la session n'est pas renouvelée
+        if (!$user || \App\Support\EtatCompte::motifBlocage($user)) {
             return response()->json([
                 'status' => false,
                 'message' => 'Session expirée. Veuillez vous reconnecter.'
@@ -723,34 +738,61 @@ class ApiAppController extends Controller
 
     public function changePassword($id, Request $request)
     {
-        // Validation des données
-        $request->validate([
-            'old_password' => 'required',
-            'new_password' => 'required|min:6|confirmed',
-            'new_password_confirmation' => 'required|min:6',
-        ]);
+        return $this->changerMotDePasse($request);
+    }
+
+    /**
+     * Changement de mot de passe depuis l'application (salarié ou entreprise).
+     *
+     * - Le compte modifié est celui de la session, jamais l'ID de l'adresse : l'application
+     *   envoie parfois l'ID de la fiche salarié, et un compte ne doit pas pouvoir viser un autre.
+     * - Accepte les noms de champs de l'application (currentPassword / newPassword) comme ceux
+     *   de l'API (old_password / new_password / new_password_confirmation).
+     * - Lève l'obligation de changer le mot de passe provisoire.
+     */
+    private function changerMotDePasse(Request $request)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+        } catch (\Throwable) {
+            $user = null;
+        }
+        if (!$user) {
+            return response()->json(['error' => 'Session expirée.', 'message' => 'Session expirée. Veuillez vous reconnecter.'], 401);
+        }
+
+        $ancien = (string) $request->input('old_password', $request->input('currentPassword', ''));
+        $nouveau = (string) $request->input('new_password', $request->input('newPassword', ''));
+        $confirmation = (string) $request->input('new_password_confirmation', $nouveau);
+
+        $refus = fn (string $message, int $statut = 422) => response()->json(['error' => $message, 'message' => $message], $statut);
+        if ($ancien === '' || $nouveau === '') {
+            return $refus('Saisissez votre mot de passe actuel et le nouveau mot de passe.');
+        }
+        if (mb_strlen($nouveau) < 8) {
+            return $refus('Le nouveau mot de passe doit contenir au moins 8 caractères.');
+        }
+        if ($nouveau !== $confirmation) {
+            return $refus('Les nouveaux mots de passe ne correspondent pas.');
+        }
+        if (!Hash::check($ancien, $user->password)) {
+            return $refus('Mot de passe actuel incorrect.', 400);
+        }
+        if (Hash::check($nouveau, $user->password)) {
+            return $refus('Le nouveau mot de passe doit être différent de l\'actuel.');
+        }
 
         try {
-            // Récupération de l'utilisateur
-            $user = User::find($id);
-
-            if (!$user) {
-                return response()->json(['error' => 'Utilisateur non trouvé.'], 404);
-            }
-
-            // Vérification de l'ancien mot de passe
-            if (!Hash::check($request->old_password, $user->password)) {
-                return response()->json(['error' => 'Ancien mot de passe incorrect.'], 400);
-            }
-
-            // Mise à jour du mot de passe
-            $user->password = Hash::make($request->new_password);
-            $user->save();
-
-            return response()->json(['success' => 'Mot de passe mis à jour avec succès.'], 200);
+            $user->forceFill([
+                'password' => Hash::make($nouveau),
+                'must_change_password' => false,
+            ])->save();
         } catch (\Exception $e) {
-            return response()->json(['error' => 'Une erreur est survenue.', 'details' => $e->getMessage()], 500);
+            Log::error('Changement de mot de passe impossible', ['user_id' => $user->id, 'erreur' => $e->getMessage()]);
+            return $refus('Une erreur est survenue. Réessayez plus tard.', 500);
         }
+
+        return response()->json(['success' => 'Mot de passe mis à jour avec succès.', 'message' => 'Mot de passe mis à jour avec succès.'], 200);
     }
 
     public function empUpdate($id, Request $request)
@@ -2956,34 +2998,7 @@ class ApiAppController extends Controller
 
     public function changePasswordCompany($id, Request $request)
     {
-        // Validation des données
-        $request->validate([
-            'old_password' => 'required',
-            'new_password' => 'required|min:6|confirmed',
-            'new_password_confirmation' => 'required|min:6',
-        ]);
-
-        try {
-            // Récupération de l'utilisateur
-            $user = User::find($id);
-
-            if (!$user) {
-                return response()->json(['error' => 'Utilisateur non trouvé.'], 404);
-            }
-
-            // Vérification de l'ancien mot de passe
-            if (!Hash::check($request->old_password, $user->password)) {
-                return response()->json(['error' => 'Ancien mot de passe incorrect.'], 400);
-            }
-
-            // Mise à jour du mot de passe
-            $user->password = Hash::make($request->new_password);
-            $user->save();
-
-            return response()->json(['success' => 'Mot de passe mis à jour avec succès.'], 200);
-        } catch (\Exception $e) {
-            return response()->json(['error' => 'Une erreur est survenue.', 'details' => $e->getMessage()], 500);
-        }
+        return $this->changerMotDePasse($request);
     }
 
     public function companyData(Request $request)

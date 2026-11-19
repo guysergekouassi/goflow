@@ -54,10 +54,10 @@ class LoginController extends Controller
             ]);
         }
 
-        // Vérifier si l'utilisateur est actif
-        if (!$user->isActive) {
+        // Compte désactivé, ou fiche salarié désactivée (départ) : pas de connexion
+        if (!$user->isActive || \App\Support\EtatCompte::motifBlocage($user)) {
             throw ValidationException::withMessages([
-                'email' => ['Votre compte a été désactivé. Contactez l\'administrateur.'],
+                'email' => [\App\Support\EtatCompte::MESSAGE_DESACTIVE],
             ]);
         }
 

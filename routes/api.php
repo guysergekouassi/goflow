@@ -29,7 +29,7 @@ Route::middleware(['verify.hub.token'])->group(function () {
     Route::get('/dashboard/exercices', [\App\Http\Controllers\Api\DashboardApiController::class, 'getExercices']);
 });
 
-Route::middleware(['jwt.auth'])->group(function () {
+Route::middleware(['jwt.auth', 'compte.actif'])->group(function () {
 
     //Employee Routes
     Route::get('/logout', [ApiAppController::class, 'logout']);

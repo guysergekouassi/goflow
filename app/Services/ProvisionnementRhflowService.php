@@ -100,6 +100,8 @@ class ProvisionnementRhflowService
                 'username'          => $identifiant,
                 'email'             => $emailAdmin,
                 'password'          => Hash::make($motDePasse ?? Str::random(40)),
+                // Mot de passe provisoire : à remplacer à la première connexion (pas s'il vient de RHFlow)
+                'must_change_password' => $empreinte === null,
                 'type'              => 'company',
                 'plan'              => $plan->id,
                 'is_active'         => 1,
@@ -179,7 +181,7 @@ class ProvisionnementRhflowService
         }
 
         return DB::transaction(function () use ($company, $d, $empreinte, $responsable) {
-            $modifs = ['password' => $empreinte];
+            $modifs = ['password' => $empreinte, 'must_change_password' => false];
 
             $identifiant = trim((string) ($d['admin_identifiant'] ?? ''));
             if ($identifiant !== '' && strcasecmp($identifiant, (string) $responsable->username) !== 0 && $this->identifiantDisponible($identifiant)) {
@@ -372,6 +374,8 @@ class ProvisionnementRhflowService
             'is_active'         => $actif ? 1 : 0,
             'email_verified_at' => now(),
             'created_by'        => $company->user_id,
+            // Mot de passe provisoire du récapitulatif : à remplacer à la première connexion
+            'must_change_password' => true,
         ])->save();
 
         return [$user, [

@@ -23,11 +23,14 @@ return Application::configure(basePath: dirname(__DIR__))
             'maintenance'        => \App\Http\Middleware\MaintenanceMode::class,
             'verify.hub.token'   => \App\Http\Middleware\VerifyHubToken::class,
             'subscription'       => \App\Http\Middleware\CheckSubscription::class,
+            'compte.actif'       => \App\Http\Middleware\CompteActifApi::class,
         ]);
 
         // Contrôle de l'abonnement sur toute la partie web authentifiée
         $middleware->web(append: [
             \App\Http\Middleware\CheckSubscription::class,
+            // Mot de passe provisoire : le compte choisit le sien avant toute autre page
+            \App\Http\Middleware\ExigerNouveauMotDePasse::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
