@@ -133,7 +133,25 @@ class AttendanceExportController extends Controller
             ->get()
             ->keyBy('id');
 
-        // 5. Synthèse par salarié (pour affichage immédiat dans le Sas RHFlow)
+        // 5. Calcul des jours ouvrés de la période (Lun-Ven, hors dimanches et samedis)
+        $joursOuvresPeriode = 0;
+        if ($startDate && $endDate) {
+            $cursor = Carbon::parse($startDate)->copy();
+            $fin = Carbon::parse($endDate);
+            while ($cursor->lte($fin)) {
+                // Lundi(1) à Vendredi(5) = jours ouvrés
+                if ($cursor->dayOfWeekIso <= 5) {
+                    $joursOuvresPeriode++;
+                }
+                $cursor->addDay();
+            }
+        }
+        // Fallback : si dates non renseignées, estimation standard (22 jours ouvrés / mois)
+        if ($joursOuvresPeriode <= 0) {
+            $joursOuvresPeriode = 22;
+        }
+
+        // 6. Synthèse par salarié (pour affichage immédiat dans le Sas RHFlow)
         $employeesSummary = [];
         $totalRetardsMinutes = 0;
         $totalAbsencesRetenues = 0;
@@ -163,13 +181,20 @@ class AttendanceExportController extends Controller
             $totalHsHours    = $quarHeure + $heureAudd + $heureNuitFerie + $heureDimFerie + $heureNuitDim;
             $montantHs       = (float) $empOvertimes->sum('montant');
 
+            // ── Suggestion automatique d'absences ──
+            // Absences suggérées = jours ouvrés de la période − jours réellement pointés
+            $absencesSuggerees = max(0, $joursOuvresPeriode - $joursPointes);
+
+            // Si des absences manuelles existent déjà dans les TimeSheets, on prend le max
+            $absencesEffectives = max($absencesSuggerees, $absencesNonJustifiees);
+
             // Anomalies à arbitrer par le RH
             $anomalies = [];
             if ($retardsCount > 0) {
                 $anomalies[] = "{$retardsCount} retard(s) totalisant {$dureeRetard} min";
             }
-            if ($absencesNonJustifiees > 0) {
-                $anomalies[] = "{$absencesNonJustifiees} jour(s) d'absence non justifiée à déduire";
+            if ($absencesEffectives > 0) {
+                $anomalies[] = "{$absencesEffectives} jour(s) d'absence détectée(s) ({$joursPointes} jours pointés / {$joursOuvresPeriode} jours ouvrés)";
             }
             if ($totalHsHours > 0) {
                 $anomalies[] = "{$totalHsHours} h supplémentaires déclarées";
@@ -181,13 +206,13 @@ class AttendanceExportController extends Controller
             }
 
             $totalRetardsMinutes += $dureeRetard;
-            $totalAbsencesRetenues += $absencesNonJustifiees;
+            $totalAbsencesRetenues += $absencesEffectives;
             $totalHeuresSup += $totalHsHours;
 
             // Calcul prévisionnel des jours travaillés pour la paie
-            // Base conventionnelle 30 jours (ou jours ouvrés) moins absences retenues
+            // Base conventionnelle 30 jours moins absences détectées
             $baseJours = 30;
-            $joursPaieProposes = max(0, $baseJours - $absencesNonJustifiees);
+            $joursPaieProposes = max(0, $baseJours - $absencesEffectives);
 
             $employeesSummary[] = [
                 'employee_id'                 => $empId,
@@ -196,9 +221,11 @@ class AttendanceExportController extends Controller
                 'email'                       => $emp ? ($emp->email ?? optional($emp->user)->email) : null,
                 'total_pointages'             => $empPointeuses->count(),
                 'jours_pointes'               => $joursPointes,
+                'jours_ouvres'                => $joursOuvresPeriode,
                 'retards_count'               => $retardsCount,
                 'retards_minutes'             => $dureeRetard,
-                'absences_non_justifiees_j'   => $absencesNonJustifiees,
+                'absences_suggerees'          => $absencesSuggerees,
+                'absences_non_justifiees_j'   => $absencesEffectives,
                 'absences_justifiees_j'       => $absencesJustifiees,
                 'jours_base'                  => $baseJours,
                 'jours_paie_proposes'         => $joursPaieProposes,
@@ -241,6 +268,7 @@ class AttendanceExportController extends Controller
             'statistiques' => [
                 'total_salaries_concernes' => count($employeeIds),
                 'total_pointages'          => $pointeuses->count(),
+                'jours_ouvres_periode'     => $joursOuvresPeriode,
                 'total_retards_minutes'    => $totalRetardsMinutes,
                 'total_absences_retenues'  => $totalAbsencesRetenues,
                 'total_heures_sup'         => $totalHeuresSup,
