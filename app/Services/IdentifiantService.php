@@ -14,6 +14,21 @@ use Illuminate\Support\Str;
  */
 class IdentifiantService
 {
+    /**
+     * Identifiant proposé (par le formulaire) s'il est bien formé et libre, sinon un identifiant
+     * libre tiré du nom : avec des noms comme Kouassi, Kouamé, Kouadio (KOUA), les 90 variantes
+     * à 2 chiffres sont vite prises, et refuser le formulaire pour autant n'aide personne.
+     */
+    public function identifiantLibre(?string $propose, string $nom): string
+    {
+        $propose = trim((string) $propose);
+        if (preg_match('/^[A-Za-z0-9_-]{3,50}$/', $propose) && !$this->estPris($propose)) {
+            return $propose;
+        }
+
+        return $this->identifiantDepuisNom($nom);
+    }
+
     public function identifiantDepuisNom(string $nom): string
     {
         $lettres = strtoupper(preg_replace('/[^A-Za-z]/', '', Str::ascii($nom)));

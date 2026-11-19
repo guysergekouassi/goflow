@@ -499,7 +499,7 @@
                                                 <input type="text" class="form-control" id="username" name="username"
                                                     value="{{ old('username') }}" readonly>
                                             </div>
-                                            <small class="text-muted">Généré automatiquement</small>
+                                            <small class="text-muted">Généré automatiquement ; s'il est déjà pris, un autre est attribué à l'enregistrement.</small>
                                         </div>
                                         <div class="col-md-4">
                                             <label for="password" class="form-label">Mot de passe</label>

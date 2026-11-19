@@ -343,7 +343,8 @@ class EmployeesController extends Controller
                     'email' => 'nullable|email',
                     'phone' => 'nullable|string|max:20',
                     'address' => 'nullable|string|max:255',
-                    'username' => 'required|string|unique:users,username',
+                    // Déjà pris : un autre identifiant libre est attribué plus bas, sans refuser le formulaire
+                    'username' => 'nullable|string|max:50',
                     'password' => 'nullable|string|min:8',
                     'employee_id' => [
                         'required',
@@ -437,6 +438,14 @@ class EmployeesController extends Controller
                     ->with('error', __('Votre limite d\'employés est atteinte, veuillez mettre à niveau votre abonnement.'));
             }
 
+            // Identifiant de connexion : celui proposé par le formulaire s'il est libre,
+            // sinon un autre au même format (4 lettres du nom + chiffres)
+            $identifiantPropose = $validated['username'] ?? null;
+            $validated['username'] = app(\App\Services\IdentifiantService::class)->identifiantLibre($identifiantPropose, $validated['name']);
+            $messageIdentifiant = $identifiantPropose && strcasecmp($identifiantPropose, $validated['username']) !== 0
+                ? " Identifiant de connexion : {$validated['username']} ({$identifiantPropose} était déjà pris)."
+                : " Identifiant de connexion : {$validated['username']}.";
+
             // Création de l'utilisateur
             $user = User::create([
                 'name' => $validated['name'],
@@ -518,7 +527,7 @@ class EmployeesController extends Controller
 
             return redirect()
                 ->route('company.contracts.employee', $employee->id)
-                ->with('success', 'Employé créé avec succès.');
+                ->with('success', 'Employé créé avec succès.' . $messageIdentifiant);
 
         } catch (\Exception $e) {
             DB::rollBack();
