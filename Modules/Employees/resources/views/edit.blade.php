@@ -452,7 +452,7 @@
                                         <div class="input-group">
                                             <span class="input-group-text"><i class="fas fa-at"></i></span>
                                             <input type="text" class="form-control" id="username"
-                                                    name="username" value="{{ old('username', $employee->username) }}" readonly>
+                                                    name="username" value="{{ old('username', optional($employee->user)->username) }}" readonly>
                                         </div>
                                         <small class="text-muted">Généré automatiquement</small>
                                     </div>
@@ -1251,9 +1251,17 @@
         document.getElementById("parts").value = Math.min(nombreDeParts, 5);
     }
 
-    // Génération automatique du nom d'utilisateur
+    // Génération automatique du nom d'utilisateur.
+    // L'identifiant est attribué une fois pour toutes : il n'est proposé que si le compte n'en a pas
+    // encore, et ne change plus quand on modifie le nom ou une autre information du salarié.
     function generateUsername() {
-        const name = document.getElementById('name').value.replace(/\s+/g, '').toUpperCase();
+        const champ = document.getElementById('username');
+        if (!champ || champ.value.trim() !== '') {
+            return;
+        }
+        const name = document.getElementById('name').value
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^A-Za-z]/g, '').toUpperCase();
         if (name.length >= 4) {
             let username = name.substring(0, 4);
             const randomNum = Math.floor(10 + Math.random() * 90);
@@ -1302,7 +1310,7 @@
             });
         }
 
-        // Générer le nom d'utilisateur si le nom existe déjà
+        // Proposer un identifiant uniquement si le compte n'en a pas encore
         if (document.getElementById('name').value) {
             generateUsername();
         }

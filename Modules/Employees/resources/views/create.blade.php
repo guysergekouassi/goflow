@@ -1334,7 +1334,9 @@
 
         // Génération automatique du nom d'utilisateur
         function generateUsername() {
-            const name = document.getElementById('name').value.replace(/\s+/g, '').toUpperCase();
+            const name = document.getElementById('name').value
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^A-Za-z]/g, '').toUpperCase();
             if (name.length >= 4) {
                 let username = name.substring(0, 4);
                 const randomNum = Math.floor(10 + Math.random() * 90);

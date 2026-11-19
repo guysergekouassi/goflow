@@ -875,7 +875,8 @@ class EmployeesController extends Controller
                     'email' => 'nullable|email',
                     'phone' => 'nullable|string|max:20',
                     'address' => 'nullable|string|max:255',
-                    'username' => 'required|string|unique:users,username,' . $employee->user_id,
+                    // L'identifiant d'un compte existant est conservé tel quel (voir plus bas)
+                    'username' => 'nullable|string|unique:users,username,' . $employee->user_id,
                     'password' => 'nullable|string|min:8',
                     'employee_id' => [
                         'required',
@@ -943,10 +944,14 @@ class EmployeesController extends Controller
             // Mise à jour de l'utilisateur
             $user = User::find($employee->user_id);
             if ($user) {
+                // L'identifiant de connexion est attribué une fois pour toutes : modifier le nom ou une
+                // autre information du salarié ne doit pas le changer (sinon il ne peut plus se connecter).
                 $user->update([
                     'name' => $validated['name'],
                     'email' => $validated['email'],
-                    'username' => $validated['username'],
+                    'username' => $user->username
+                        ?: ($validated['username'] ?? null)
+                        ?: app(\App\Services\IdentifiantService::class)->identifiantDepuisNom($validated['name']),
                 ]);
 
                 // Mise à jour du mot de passe si fourni
