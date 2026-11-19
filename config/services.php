@@ -49,4 +49,12 @@ return [
             ? 'https://pay.genius.ci/api/v1/merchant' 
             : 'https://pay.genius.ci/api/v1/merchant', // Usually documentation says the same endpoint or distinct ones, here we use what user provided
     ],
+
+    // Jeton partagé avec RHFlow et FlowHub (en-tête X-Sync-Token ou X-Hub-Token).
+    // Aucune valeur par défaut : sans jeton configuré, l'API de synchronisation est fermée.
+    // Générer un jeton : php -r "echo bin2hex(random_bytes(32));"
+    'flowhub' => [
+        'shared_token' => env('HUB_SHARED_TOKEN'),
+        'sync_token'   => env('SYNC_SHARED_TOKEN'),
+    ],
 ];
