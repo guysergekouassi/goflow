@@ -160,6 +160,63 @@ class ProvisionnementRhflowService
     }
 
     /**
+     * Aligne le compte responsable de la société sur ses accès RHFlow : empreinte du mot de passe,
+     * et identifiant / e-mail s'ils sont libres. Sert pour une société ouverte avant cette
+     * fonctionnalité, et à chaque changement de mot de passe du responsable dans RHFlow.
+     *
+     * @return array{identifiant: string, email: ?string}
+     */
+    public function alignerResponsable(Company $company, array $d): array
+    {
+        $empreinte = $this->empreinteBcrypt($d['admin_mot_de_passe_hash'] ?? null);
+        if (!$empreinte) {
+            throw new ProvisionnementException("Empreinte de mot de passe invalide.", 422);
+        }
+
+        $responsable = $company->user_id ? User::find($company->user_id) : null;
+        if (!$responsable) {
+            throw new ProvisionnementException("La société GPFlow #{$company->id} n'a pas de compte responsable.", 404);
+        }
+
+        return DB::transaction(function () use ($company, $d, $empreinte, $responsable) {
+            $modifs = ['password' => $empreinte];
+
+            $identifiant = trim((string) ($d['admin_identifiant'] ?? ''));
+            if ($identifiant !== '' && strcasecmp($identifiant, (string) $responsable->username) !== 0 && $this->identifiantDisponible($identifiant)) {
+                $modifs['username'] = $identifiant;
+            }
+            $email = $this->emailDisponible($d['admin_email'] ?? null, $responsable->id);
+            if ($email && $email !== $responsable->email) {
+                $modifs['email'] = $email;
+            }
+
+            // Écriture directe : l'empreinte est déjà calculée, elle ne doit pas être re-hachée
+            DB::table('users')->where('id', $responsable->id)->update($modifs + ['updated_at' => now()]);
+            $identifiantFinal = $modifs['username'] ?? $responsable->username;
+
+            // Les récapitulatifs encore disponibles ne doivent plus montrer l'ancien mot de passe provisoire
+            foreach (LotAcces::where('company_id', $company->id)->get() as $lot) {
+                $contenu = $lot->contenu;
+                $change = false;
+                foreach ($contenu['comptes'] ?? [] as $i => $compte) {
+                    if (($compte['type'] ?? null) === 'Responsable entreprise') {
+                        $contenu['comptes'][$i]['identifiant'] = $identifiantFinal;
+                        $contenu['comptes'][$i]['mot_de_passe'] = 'Le même que dans RHFlow';
+                        $contenu['comptes'][$i]['email'] = $modifs['email'] ?? $responsable->email;
+                        $change = true;
+                    }
+                }
+                if ($change) {
+                    $lot->contenu = $contenu;
+                    $lot->save();
+                }
+            }
+
+            return ['identifiant' => $identifiantFinal, 'email' => $modifs['email'] ?? $responsable->email];
+        });
+    }
+
+    /**
      * Crée ou met à jour les salariés d'une société à partir des fiches RHFlow.
      *
      * @param  array  $salaries  [{rhflow_employee_id, nom, email?, telephone?, genre?, date_naissance?,

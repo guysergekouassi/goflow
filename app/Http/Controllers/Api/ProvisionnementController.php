@@ -122,6 +122,42 @@ class ProvisionnementController extends Controller
         ]);
     }
 
+    /**
+     * POST /api/provisionnement/entreprises/{id}/responsable : aligne le compte responsable
+     * sur ses accès RHFlow (empreinte du mot de passe, identifiant et e-mail s'ils sont libres).
+     */
+    public function responsable(Request $request, int $companyId): JsonResponse
+    {
+        $d = $request->validate([
+            'source'                  => 'required|string|max:191',
+            'rhflow_company_id'       => 'required|integer|min:1',
+            'admin_identifiant'       => 'nullable|string|max:100',
+            'admin_email'             => 'nullable|string|max:255',
+            'admin_mot_de_passe_hash' => 'required|string|max:255',
+        ]);
+
+        $company = Company::find($companyId);
+        if (!$company) {
+            return response()->json(['success' => false, 'message' => "La société GPFlow #{$companyId} n'existe pas."], 404);
+        }
+        if ($company->rhflow_source !== $d['source'] || (int) $company->rhflow_company_id !== (int) $d['rhflow_company_id']) {
+            return response()->json([
+                'success' => false,
+                'message' => "La société GPFlow #{$companyId} ({$company->name}) n'est pas liée à cette entreprise RHFlow.",
+            ], 409);
+        }
+
+        try {
+            $r = $this->service->alignerResponsable($company, $d);
+        } catch (ProvisionnementException $e) {
+            return $this->refus($e);
+        } catch (Throwable $e) {
+            return $this->erreur($e, 'mise à jour du compte responsable');
+        }
+
+        return response()->json(['success' => true, 'identifiant_admin' => $r['identifiant'], 'email_admin' => $r['email']]);
+    }
+
     private function refus(ProvisionnementException $e): JsonResponse
     {
         $statut = in_array($e->getCode(), [404, 409, 422, 500], true) ? $e->getCode() : 422;

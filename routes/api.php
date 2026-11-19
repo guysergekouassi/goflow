@@ -160,4 +160,6 @@ Route::middleware([VerifyHubToken::class])->group(function () {
     Route::post('/provisionnement/entreprises', [\App\Http\Controllers\Api\ProvisionnementController::class, 'entreprise']);
     Route::post('/provisionnement/entreprises/{companyId}/salaries', [\App\Http\Controllers\Api\ProvisionnementController::class, 'salaries'])
         ->whereNumber('companyId');
+    Route::post('/provisionnement/entreprises/{companyId}/responsable', [\App\Http\Controllers\Api\ProvisionnementController::class, 'responsable'])
+        ->whereNumber('companyId');
 });
