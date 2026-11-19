@@ -10,6 +10,7 @@ use App\Models\Designation;
 use App\Models\LotAcces;
 use App\Models\Plan;
 use App\Models\User;
+use App\Services\NotificationService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -112,7 +113,8 @@ class ProvisionnementRhflowService
                 'phone'                  => $d['telephone'] ?? null,
                 'address'                => $d['adresse'] ?? null,
                 'city'                   => $d['ville'] ?? null,
-                'country'                => $d['pays'] ?? null,
+                // Colonne obligatoire (défaut « France ») : pays de RHFlow, sinon Côte d'Ivoire
+                'country'                => ($d['pays'] ?? null) ?: "Côte d'Ivoire",
                 'working_hours_per_week' => 40,
                 'working_days_per_week'  => 5,
                 'is_active'              => true,
@@ -208,7 +210,19 @@ class ProvisionnementRhflowService
         }
 
         if ($nouveauxComptes) {
-            $lot = $this->ajouterAuLot($lot, $company, $nouveauxComptes);
+            // Sans lot désigné (synchronisation automatique, ou 1er envoi d'une synchronisation manuelle) :
+            // les comptes du jour rejoignent le récapitulatif du jour tant qu'il n'a pas été téléchargé,
+            // et les responsables de la société sont prévenus.
+            $lotDesigne = $lot !== null;
+            $lot = $this->ajouterAuLot(
+                $lot ?? $this->lotDuJour($company),
+                $company,
+                $nouveauxComptes,
+                'Nouveaux comptes ' . $company->name . ' du ' . now()->format('d/m/Y')
+            );
+            if (!$lotDesigne) {
+                $this->prevenirResponsables($company, count($nouveauxComptes));
+            }
         }
 
         return $resultat + ['lot' => $lot];
@@ -344,12 +358,47 @@ class ProvisionnementRhflowService
         return $code;
     }
 
-    private function ajouterAuLot(?LotAcces $lot, Company $company, array $comptes): LotAcces
+    /** Récapitulatif créé aujourd'hui pour la société et pas encore téléchargé. */
+    private function lotDuJour(Company $company): ?LotAcces
+    {
+        return LotAcces::where('company_id', $company->id)
+            ->whereNull('telecharge_le')
+            ->where('expire_le', '>', now())
+            ->where('created_at', '>=', now()->startOfDay())
+            ->latest('id')
+            ->first();
+    }
+
+    /** Notification GPFlow aux responsables de la société (compte entreprise et RH). */
+    private function prevenirResponsables(Company $company, int $nombre): void
+    {
+        try {
+            $responsables = User::where('company_id', $company->id)->whereIn('type', ['company', 'hr'])->get();
+            foreach ($responsables as $responsable) {
+                NotificationService::create(
+                    $responsable,
+                    'user',
+                    'Nouveaux comptes à remettre',
+                    "{$nombre} compte(s) GPFlow créé(s) depuis RHFlow. Identifiants et mots de passe provisoires à télécharger dans « Récapitulatifs des accès ».",
+                    [
+                        'icon'       => 'ti-key',
+                        'sender_id'  => null,
+                        'action_url' => route('acces-gpflow.index'),
+                        'expires_at' => now()->addDays(self::DUREE_LOT_JOURS),
+                    ]
+                );
+            }
+        } catch (Throwable $e) {
+            Log::warning('Provisionnement RHFlow : notification des responsables impossible', ['company_id' => $company->id, 'erreur' => $e->getMessage()]);
+        }
+    }
+
+    private function ajouterAuLot(?LotAcces $lot, Company $company, array $comptes, ?string $libelle = null): LotAcces
     {
         if (!$lot) {
             $lot = new LotAcces([
                 'company_id' => $company->id,
-                'libelle'    => 'Ouverture des accès ' . $company->name . ' du ' . now()->format('d/m/Y H:i'),
+                'libelle'    => $libelle ?? ('Ouverture des accès ' . $company->name . ' du ' . now()->format('d/m/Y H:i')),
                 'contenu'    => ['entreprise' => ['id' => $company->id, 'nom' => $company->name], 'comptes' => []],
                 'expire_le'  => now()->addDays(self::DUREE_LOT_JOURS),
             ]);
