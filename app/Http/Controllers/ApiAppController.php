@@ -3122,8 +3122,9 @@ class ApiAppController extends Controller
                 return response()->json(['success' => false, 'message' => 'Employé non trouvé'], 404);
             }
 
-            // Vérifier si l'employé appartient à l'utilisateur
-            if ($employee->company_id != $user->id) {
+            // Vérifier si l'employé appartient à l'entreprise de l'utilisateur
+            $companyId = $user->company_id ?? $user->id;
+            if ($employee->company_id != $companyId && $employee->company_id != $user->id) {
                 return response()->json(['success' => false, 'message' => 'Accès non autorisé à cet employé'], 403);
             }
 
@@ -3131,7 +3132,7 @@ class ApiAppController extends Controller
             $currentDate = $now->toDateString();
 
             // L'emplacement de l'utilisateur connecté
-            $location = WorkLocation::where('company_id', '=', $user->company_id)->where('is_active', '=', 1)->first();
+            $location = WorkLocation::where('company_id', '=', $companyId)->where('is_active', '=', 1)->first();
 
             // Vérifier si l'employé a déjà deux pointages aujourd'hui
             $existingPointages = Pointeuse::where('emp_id', $employee_id)
@@ -3142,22 +3143,25 @@ class ApiAppController extends Controller
                 return response()->json(['success' => false, 'message' => "Deux pointages déjà enregistrés pour aujourd'hui"], 400);
             }
 
+            // Déterminer le type (entrée si premier pointage, sortie si deuxième)
+            $typePointage = ($existingPointages == 0) ? 'entree' : 'sortie';
+
             // Enregistrer le pointage
             $pointage = Pointeuse::create([
                 'employee_id' => $employee_id,
                 'auth_date_time' => $now,
                 'auth_date' => $now->toDateString(),
                 'auth_time' => $now->toTimeString(),
-                'type' => 'entree' ? 'entree' : 'sortie',
+                'type' => $typePointage,
                 'direction' => $user->name,
-                'name_device' => 'Pointeuse QR CODE',
+                'name_device' => 'Pointeuse Entreprise Mobile',
                 'emp_id' => $employee_id ?? null,
                 'no_device' => $user->id,
                 'location_id' => $location->id ?? null,
                 'card_no' => 'N/A',
                 'name_emp' => $employee->name,
                 'status' => 1,
-                'company_id' => $user->id,
+                'company_id' => $companyId,
             ]);
 
             return response()->json([
