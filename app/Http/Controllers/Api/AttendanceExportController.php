@@ -180,6 +180,52 @@ class AttendanceExportController extends Controller
             $heureNuitDim    = (float) $empOvertimes->sum('heure_nuit_dim_ferie');
             $totalHsHours    = $quarHeure + $heureAudd + $heureNuitFerie + $heureDimFerie + $heureNuitDim;
             $montantHs       = (float) $empOvertimes->sum('montant');
+            $sourceHs        = $empOvertimes->count() > 0 ? 'overtimes_validees' : 'none';
+
+            // Si aucune heure sup saisie dans le module Time, détection automatique via les scans journaliers
+            if ($totalHsHours <= 0 && $empPointeuses->count() > 0) {
+                $scansParJour = $empPointeuses->groupBy('auth_date');
+                foreach ($scansParJour as $dateJour => $scansDuJour) {
+                    $carbonDate = Carbon::parse($dateJour);
+                    $estDimanche = $carbonDate->isSunday();
+
+                    $premierScan = $scansDuJour->sortBy('auth_date_time')->first();
+                    $dernierScan = $scansDuJour->sortByDesc('auth_date_time')->first();
+
+                    if ($premierScan && $dernierScan && $premierScan->id !== $dernierScan->id) {
+                        $arrivee = Carbon::parse($premierScan->auth_date_time);
+                        $depart  = Carbon::parse($dernierScan->auth_date_time);
+                        $dureeHeures = max(0, $depart->diffInMinutes($arrivee) / 60);
+
+                        // Déduire 1h de pause déjeuner si journée de plus de 6h
+                        $heuresTravaillees = $dureeHeures >= 6 ? max(0, $dureeHeures - 1.0) : $dureeHeures;
+
+                        if ($estDimanche) {
+                            $heureDimFerie += round($heuresTravaillees, 2);
+                        } else {
+                            if ($heuresTravaillees > 8) {
+                                $hsJour = $heuresTravaillees - 8;
+                                $h15Jour = min($hsJour, 1.2);
+                                $h50Jour = max(0, $hsJour - 1.2);
+                                $quarHeure += round($h15Jour, 2);
+                                $heureAudd += round($h50Jour, 2);
+                            }
+
+                            if ($depart->hour >= 21) {
+                                $debutNuit = $depart->copy()->setTime(21, 0);
+                                $dureeNuit = min($depart->diffInMinutes($debutNuit) / 60, 4);
+                                if ($dureeNuit > 0) {
+                                    $heureNuitFerie += round($dureeNuit, 2);
+                                }
+                            }
+                        }
+                    }
+                }
+                $totalHsHours = round($quarHeure + $heureAudd + $heureNuitFerie + $heureDimFerie + $heureNuitDim, 2);
+                if ($totalHsHours > 0) {
+                    $sourceHs = 'pointages_calcules';
+                }
+            }
 
             // ── Suggestion automatique d'absences ──
             // Absences suggérées = jours ouvrés de la période − jours réellement pointés
@@ -237,6 +283,7 @@ class AttendanceExportController extends Controller
                     'heure_nuit_dim_ferie'    => $heureNuitDim,
                     'total_heures'            => $totalHsHours,
                     'montant_estime'          => $montantHs,
+                    'source'                  => $sourceHs,
                 ],
                 'anomalies'                   => $anomalies,
                 'statut_suggere'              => $statutSuggere,
