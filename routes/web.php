@@ -25,6 +25,10 @@ Route::get('/maintenance', function () {
 
 // Routes des notifications (accessibles à tous les utilisateurs authentifiés)
 Route::middleware(['auth'])->group(function () {
+    // Récapitulatifs des accès ouverts depuis RHFlow (super-admin, responsables de la société)
+    Route::get('/acces-gpflow', [\App\Http\Controllers\LotAccesController::class, 'index'])->name('acces-gpflow.index');
+    Route::get('/acces-gpflow/{lot}/telecharger', [\App\Http\Controllers\LotAccesController::class, 'telecharger'])->name('acces-gpflow.telecharger');
+
     Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
     Route::get('/notifications/unread', [NotificationController::class, 'unread'])->name('notifications.unread');
     Route::get('/notifications/{notification}', [NotificationController::class, 'show'])->name('notifications.show');

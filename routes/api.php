@@ -155,4 +155,9 @@ Route::middleware([VerifyHubToken::class])->group(function () {
     // API d'exportation des présences pour le Sas de Contrôle RHFlow
     Route::get('/presences/export', [\App\Http\Controllers\Api\AttendanceExportController::class, 'export']);
     Route::get('/presences/periodes', [\App\Http\Controllers\Api\AttendanceExportController::class, 'getPeriodes']);
+
+    // Ouverture des comptes GPFlow depuis RHFlow (société, salariés, récapitulatif des accès)
+    Route::post('/provisionnement/entreprises', [\App\Http\Controllers\Api\ProvisionnementController::class, 'entreprise']);
+    Route::post('/provisionnement/entreprises/{companyId}/salaries', [\App\Http\Controllers\Api\ProvisionnementController::class, 'salaries'])
+        ->whereNumber('companyId');
 });

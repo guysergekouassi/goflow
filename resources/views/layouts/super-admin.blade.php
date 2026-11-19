@@ -92,6 +92,12 @@
                             <div>Entreprises</div>
                         </a>
                     </li>
+                    <li class="menu-item {{ Request::route()->getName() == 'acces-gpflow.index' ? ' active' : '' }}">
+                        <a href="{{ route('acces-gpflow.index') }}" class="menu-link">
+                            <i class="menu-icon ti ti-key"></i>
+                            <div>Récapitulatifs des accès</div>
+                        </a>
+                    </li>
                     <li class="menu-item {{ Request::route()->getName() == 'super-admin.enterprises.lastlogin' || Request::route()->getName() == 'super-admin.enterprises.showactivity' ? ' active' : '' }}">
                         <a href="{{ route('super-admin.enterprises.lastlogin') }}" class="menu-link">
                             <i class="menu-icon ti ti-save-alt"></i>

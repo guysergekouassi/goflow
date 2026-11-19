@@ -291,6 +291,8 @@ class AttendanceExportController extends Controller
 
             $employeesSummary[] = [
                 'employee_id'                 => $empId,
+                // Fiche RHFlow d'origine (salariés transférés depuis RHFlow) : correspondance exacte dans le Sas
+                'rhflow_employee_id'          => $emp?->rhflow_employee_id,
                 'matricule'                   => $emp ? ($emp->matricule ?? $emp->id) : (string)$empId,
                 'nom'                         => $emp ? ($emp->name ?? trim(($emp->first_name ?? '') . ' ' . ($emp->last_name ?? ''))) : "Employé #{$empId}",
                 'email'                       => $emp ? ($emp->email ?? optional($emp->user)->email) : null,

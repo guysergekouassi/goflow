@@ -955,6 +955,12 @@
                             class="submenu-item {{ Request::route()->getName() == 'company.employees.demandes.index' || Request::route()->getName() == 'company.employees.demandes.show' ? 'active' : '' }}">
                             <i class="fas fa-inbox"></i> Demandes Employés
                         </a>
+                        @if (in_array(auth()->user()->type, ['company', 'hr']))
+                            <a href="{{ route('acces-gpflow.index') }}"
+                                class="submenu-item {{ Request::route()->getName() == 'acces-gpflow.index' ? 'active' : '' }}">
+                                <i class="fas fa-key"></i> Récapitulatifs des accès
+                            </a>
+                        @endif
 
                         {{-- <div class="submenu-group-title"><i class="fas fa-minus"></i> Contrats &amp; Ruptures</div> --}}
                         <!-- <a href="{{ route('company.contracts.index') }}"
