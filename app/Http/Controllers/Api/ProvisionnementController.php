@@ -38,6 +38,9 @@ class ProvisionnementController extends Controller
             'pays'              => 'nullable|string|max:100',
             'admin_nom'         => 'nullable|string|max:255',
             'admin_email'       => 'nullable|string|max:255',
+            // Mêmes accès que dans RHFlow pour le responsable : identifiant et empreinte bcrypt du mot de passe
+            'admin_identifiant'       => 'nullable|string|max:100',
+            'admin_mot_de_passe_hash' => 'nullable|string|max:255',
         ]);
 
         try {
@@ -54,6 +57,9 @@ class ProvisionnementController extends Controller
             'nom'               => $r['company']->name,
             'creee'             => $r['creee'],
             'identifiant_admin' => $r['identifiant_admin'],
+            'email_admin'       => $r['email_admin'] ?? null,
+            // « rhflow » : même mot de passe que dans RHFlow ; « provisoire » : voir le récapitulatif des accès
+            'acces_admin'       => $r['acces_admin'] ?? null,
             'lot_acces_id'      => $r['lot']?->id,
             'url_recapitulatif' => route('acces-gpflow.index'),
         ], $r['creee'] ? 201 : 200);

@@ -85,8 +85,13 @@ class ProvisionnementRhflowService
         $plan = $this->planParDefaut();
 
         return DB::transaction(function () use ($d, $source, $rhflowId, $email, $plan) {
-            $identifiant = $this->identifiants->identifiantDepuisNom($d['nom']);
-            $motDePasse  = $this->identifiants->motDePasseProvisoire();
+            // Mêmes accès que dans RHFlow : identifiant, e-mail et mot de passe du compte responsable
+            // (reçu sous forme d'empreinte bcrypt, jamais en clair). À défaut : identifiant tiré du nom
+            // et mot de passe provisoire, à retrouver dans le récapitulatif des accès.
+            $identifiant = $this->identifiantDisponible($d['admin_identifiant'] ?? null)
+                ?? $this->identifiants->identifiantDepuisNom($d['nom']);
+            $empreinte   = $this->empreinteBcrypt($d['admin_mot_de_passe_hash'] ?? null);
+            $motDePasse  = $empreinte ? null : $this->identifiants->motDePasseProvisoire();
             $emailAdmin  = $this->emailDisponible($d['admin_email'] ?? $email);
 
             $responsable = new User();
@@ -94,7 +99,7 @@ class ProvisionnementRhflowService
                 'name'              => $d['admin_nom'] ?? $d['nom'],
                 'username'          => $identifiant,
                 'email'             => $emailAdmin,
-                'password'          => Hash::make($motDePasse),
+                'password'          => Hash::make($motDePasse ?? Str::random(40)),
                 'type'              => 'company',
                 'plan'              => $plan->id,
                 'is_active'         => 1,
@@ -129,16 +134,28 @@ class ProvisionnementRhflowService
 
             $responsable->forceFill(['company_id' => $company->id])->save();
 
+            if ($empreinte) {
+                // Écriture directe : l'empreinte est déjà calculée, elle ne doit pas être re-hachée
+                DB::table('users')->where('id', $responsable->id)->update(['password' => $empreinte]);
+            }
+
             $lot = $this->ajouterAuLot(null, $company, [[
                 'type'         => 'Responsable entreprise',
                 'nom'          => $responsable->name,
                 'matricule'    => null,
                 'identifiant'  => $identifiant,
-                'mot_de_passe' => $motDePasse,
+                'mot_de_passe' => $empreinte ? 'Le même que dans RHFlow' : $motDePasse,
                 'email'        => $emailAdmin,
             ]]);
 
-            return ['company' => $company, 'creee' => true, 'lot' => $lot, 'identifiant_admin' => $identifiant];
+            return [
+                'company'            => $company,
+                'creee'              => true,
+                'lot'                => $lot,
+                'identifiant_admin'  => $identifiant,
+                'email_admin'        => $emailAdmin,
+                'acces_admin'        => $empreinte ? 'rhflow' : 'provisoire',
+            ];
         });
     }
 
@@ -425,6 +442,31 @@ class ProvisionnementRhflowService
         }
 
         return $plan;
+    }
+
+    /**
+     * Identifiant proposé par RHFlow, retenu s'il est libre dans GPFlow et accepté par la page
+     * de connexion de GPFlow (lettres, chiffres, « _ » et « - », 3 à 50 caractères).
+     */
+    private function identifiantDisponible(?string $identifiant): ?string
+    {
+        $identifiant = trim((string) $identifiant);
+        if (!preg_match('/^[A-Za-z0-9_-]{3,50}$/', $identifiant)) {
+            return null;
+        }
+
+        return User::where('username', $identifiant)->exists() ? null : $identifiant;
+    }
+
+    /** Empreinte bcrypt valide (même format que les mots de passe de GPFlow), sinon null. */
+    private function empreinteBcrypt(?string $empreinte): ?string
+    {
+        $empreinte = (string) $empreinte;
+        if (!preg_match('/^\$2[aby]\$\d{2}\$[.\/A-Za-z0-9]{53}$/', $empreinte)) {
+            return null;
+        }
+
+        return password_get_info($empreinte)['algoName'] === 'bcrypt' ? $empreinte : null;
     }
 
     /** E-mail utilisable pour un compte : valide et pas déjà pris par un autre compte (users.email est unique). */
