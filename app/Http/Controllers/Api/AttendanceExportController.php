@@ -11,6 +11,10 @@ use Modules\Employees\Models\Employee;
 use Modules\Time\Models\Pointeuse;
 use Modules\Time\Models\TimeSheet;
 use Modules\Time\Models\Overtime;
+use Modules\Time\Models\Holiday;
+use App\Services\HeuresSupPointageService;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class AttendanceExportController extends Controller
 {
@@ -151,11 +155,23 @@ class AttendanceExportController extends Controller
             $joursOuvresPeriode = 22;
         }
 
+        // Fériés chômés de la période : les heures qui y sont travaillées sont majorées comme un dimanche
+        $feriesChomes = [];
+        if ($companyId && $startDate && $endDate) {
+            try {
+                $feriesChomes = Holiday::datesBetween($companyId, Carbon::parse($startDate), Carbon::parse($endDate), false);
+            } catch (Throwable $e) {
+                Log::warning('Export présences : fériés non chargés : ' . $e->getMessage());
+            }
+        }
+        $hsService = app(HeuresSupPointageService::class);
+
         // 6. Synthèse par salarié (pour affichage immédiat dans le Sas RHFlow)
         $employeesSummary = [];
         $totalRetardsMinutes = 0;
         $totalAbsencesRetenues = 0;
         $totalHeuresSup = 0;
+        $totalDepassementsPause = 0;
         $totalAnomalies = 0;
 
         foreach ($employeeIds as $empId) {
@@ -182,50 +198,60 @@ class AttendanceExportController extends Controller
             $montantHs       = (float) $empOvertimes->sum('montant');
             $sourceHs        = $empOvertimes->count() > 0 ? 'overtimes_validees' : 'none';
 
-            // Si aucune heure sup saisie dans le module Time, détection automatique via les scans journaliers
-            if ($totalHsHours <= 0 && $empPointeuses->count() > 0) {
-                $scansParJour = $empPointeuses->groupBy('auth_date');
-                foreach ($scansParJour as $dateJour => $scansDuJour) {
-                    $carbonDate = Carbon::parse($dateJour);
-                    $estDimanche = $carbonDate->isSunday();
-
-                    $premierScan = $scansDuJour->sortBy('auth_date_time')->first();
-                    $dernierScan = $scansDuJour->sortByDesc('auth_date_time')->first();
-
-                    if ($premierScan && $dernierScan && $premierScan->id !== $dernierScan->id) {
-                        $arrivee = Carbon::parse($premierScan->auth_date_time);
-                        $depart  = Carbon::parse($dernierScan->auth_date_time);
-                        $dureeHeures = max(0, $depart->diffInMinutes($arrivee) / 60);
-
-                        // Déduire 1h de pause déjeuner si journée de plus de 6h
-                        $heuresTravaillees = $dureeHeures >= 6 ? max(0, $dureeHeures - 1.0) : $dureeHeures;
-
-                        if ($estDimanche) {
-                            $heureDimFerie += round($heuresTravaillees, 2);
-                        } else {
-                            if ($heuresTravaillees > 8) {
-                                $hsJour = $heuresTravaillees - 8;
-                                $h15Jour = min($hsJour, 1.2);
-                                $h50Jour = max(0, $hsJour - 1.2);
-                                $quarHeure += round($h15Jour, 2);
-                                $heureAudd += round($h50Jour, 2);
-                            }
-
-                            if ($depart->hour >= 21) {
-                                $debutNuit = $depart->copy()->setTime(21, 0);
-                                $dureeNuit = min($depart->diffInMinutes($debutNuit) / 60, 4);
-                                if ($dureeNuit > 0) {
-                                    $heureNuitFerie += round($dureeNuit, 2);
-                                }
-                            }
-                        }
-                    }
+            // Analyse jour par jour des pointages : contrôle de la pause (1 h en Côte d'Ivoire)
+            // et heures sup détectées (voir HeuresSupPointageService pour les règles)
+            $hsPointages = ['quar_heure' => 0, 'heure_audd' => 0, 'heure_nuit_ferie' => 0, 'heure_dim_ferie' => 0, 'heure_nuit_dim_ferie' => 0];
+            $pauses = [
+                'pause_reglementaire_minutes' => HeuresSupPointageService::PAUSE_REGLEMENTAIRE_MINUTES,
+                'jours_analyses'              => 0,
+                'jours_pause_pointee'         => 0,
+                'jours_pause_courte'          => 0,
+                'jours_pause_depassee'        => 0,
+                'depassement_total_minutes'   => 0,
+                'depassements'                => [],
+            ];
+            $scansParJour = $empPointeuses->groupBy(fn ($p) => Carbon::parse($p->auth_date ?: $p->auth_date_time)->toDateString());
+            foreach ($scansParJour as $dateJour => $scansDuJour) {
+                $reposOuFerie = Carbon::parse($dateJour)->isSunday() || in_array($dateJour, $feriesChomes, true);
+                $journee = $hsService->analyserJournee($scansDuJour, $reposOuFerie);
+                if (!$journee) {
+                    continue;
                 }
-                $totalHsHours = round($quarHeure + $heureAudd + $heureNuitFerie + $heureDimFerie + $heureNuitDim, 2);
+
+                $pauses['jours_analyses']++;
+                foreach ($journee['heures_sup'] as $categorie => $heures) {
+                    $hsPointages[$categorie] += $heures;
+                }
+                if ($journee['pause_pointee_minutes'] > 0) {
+                    $pauses['jours_pause_pointee']++;
+                }
+                if ($journee['pause_courte']) {
+                    $pauses['jours_pause_courte']++;
+                }
+                if ($journee['pause_depassement_minutes'] > 0) {
+                    $pauses['jours_pause_depassee']++;
+                    $pauses['depassement_total_minutes'] += $journee['pause_depassement_minutes'];
+                    $pauses['depassements'][] = [
+                        'date'                => $dateJour,
+                        'pause_minutes'       => $journee['pause_pointee_minutes'],
+                        'depassement_minutes' => $journee['pause_depassement_minutes'],
+                    ];
+                }
+            }
+
+            // Sans heure sup saisie dans le module Time, on retient celles détectées sur les pointages
+            if ($totalHsHours <= 0) {
+                $quarHeure      = round($hsPointages['quar_heure'], 2);
+                $heureAudd      = round($hsPointages['heure_audd'], 2);
+                $heureNuitFerie = round($hsPointages['heure_nuit_ferie'], 2);
+                $heureDimFerie  = round($hsPointages['heure_dim_ferie'], 2);
+                $heureNuitDim   = round($hsPointages['heure_nuit_dim_ferie'], 2);
+                $totalHsHours   = round($quarHeure + $heureAudd + $heureNuitFerie + $heureDimFerie + $heureNuitDim, 2);
                 if ($totalHsHours > 0) {
                     $sourceHs = 'pointages_calcules';
                 }
             }
+            $totalDepassementsPause += $pauses['depassement_total_minutes'];
 
             // ── Suggestion automatique d'absences ──
             // Absences suggérées = jours ouvrés de la période − jours réellement pointés
@@ -244,6 +270,9 @@ class AttendanceExportController extends Controller
             }
             if ($totalHsHours > 0) {
                 $anomalies[] = "{$totalHsHours} h supplémentaires déclarées";
+            }
+            if ($pauses['jours_pause_depassee'] > 0) {
+                $anomalies[] = "{$pauses['jours_pause_depassee']} pause(s) de plus d'1 h (+{$pauses['depassement_total_minutes']} min au total)";
             }
 
             $statutSuggere = count($anomalies) > 0 ? 'a_arbitrer' : 'conforme';
@@ -285,6 +314,7 @@ class AttendanceExportController extends Controller
                     'montant_estime'          => $montantHs,
                     'source'                  => $sourceHs,
                 ],
+                'pauses'                      => $pauses,
                 'anomalies'                   => $anomalies,
                 'statut_suggere'              => $statutSuggere,
             ];
@@ -319,6 +349,7 @@ class AttendanceExportController extends Controller
                 'total_retards_minutes'    => $totalRetardsMinutes,
                 'total_absences_retenues'  => $totalAbsencesRetenues,
                 'total_heures_sup'         => $totalHeuresSup,
+                'total_depassements_pause_minutes' => $totalDepassementsPause,
                 'total_a_arbitrer'         => $totalAnomalies,
             ],
             'employees_summary' => $employeesSummary,
